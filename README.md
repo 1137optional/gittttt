@@ -116,7 +116,7 @@ All endpoints are prefixed with `/api`.
 | `POST /api/github/create`           | Body `{name, description?, isPrivate?, addReadme?}`    |
 | `GET  /api/local-repos`             | Local clones in repos dir + recently-opened paths      |
 | `GET  /api/fs/browse?path=&hidden=` | Folder-picker payload (subdirs flagged with isGitRepo) |
-| `GET  /events`                      | Server-Sent Events: `repoChanged`                      |
+| `GET  /events`                      | SSE: `repoChanged`                                     |
 
 ## Project layout
 

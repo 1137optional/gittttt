@@ -22,6 +22,8 @@ export function TopNav(): JSX.Element {
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
   const setShowRepoPicker = useApp((s) => s.setShowRepoPicker);
+  const currentMode = useApp((s) => s.currentMode);
+  const toggleMode = useApp((s) => s.toggleMode);
 
   const activePath = repo?.path ?? '';
   const openPicker = (): void => setShowRepoPicker(true);
@@ -77,6 +79,18 @@ export function TopNav(): JSX.Element {
         </button>
       </div>
 
+      {/* Mode toggle: bug icon while in graph mode (suggests "switch to debug"),
+          branch icon while in debug mode (suggests "switch back to graph").
+          Same vector button, currentColor, 24px per spec. */}
+      <button
+        type="button"
+        className="topnav-action icon-only"
+        onClick={() => toggleMode()}
+        title={currentMode === 'debug' ? '切到图谱' : '切到调试'}
+        aria-label={currentMode === 'debug' ? '切到图谱' : '切到调试'}
+      >
+        <Icon name={currentMode === 'debug' ? 'branch' : 'bug'} size={18} />
+      </button>
       <button
         type="button"
         className="topnav-action icon-only"

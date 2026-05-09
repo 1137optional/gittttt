@@ -1,4 +1,6 @@
 import type {
+  AIChatRequest,
+  AIChatResponse,
   Branch,
   Commit,
   CreateGitHubRepoInput,
@@ -6,9 +8,15 @@ import type {
   GitHubAuthStatus,
   GitHubRepoSummary,
   LocalRepoSummary,
+  ProjectFileContent,
+  ProjectFileTreeNode,
+  ProjectSearchHit,
   RepoInfo,
+  Skill,
   Stash,
   Tag,
+  TerminalRunRequest,
+  TerminalRunResult,
   WorkingTreeStatus,
 } from '@shared/types';
 
@@ -17,7 +25,7 @@ import type {
 //   - parses JSON responses,
 //   - converts non-2xx responses into thrown Error objects with the server message.
 async function http<T>(
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'DELETE' | 'PUT',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -105,6 +113,43 @@ export const api = {
   githubCreate: (input: CreateGitHubRepoInput): Promise<{ ok: true; repo: RepoInfo }> =>
     http('POST', '/github/create', input),
   localRepos: (): Promise<LocalRepoSummary[]> => http('GET', '/local-repos'),
+
+  // Debug-mode AI proxy. Goes through the local server so the API key never
+  // touches the embedded preview iframe and we side-step CORS.
+  aiChat: (req: AIChatRequest): Promise<AIChatResponse> => http('POST', '/ai/chat', req),
+
+  // Skills catalog (debug-mode AI tool surface). The server is the source
+  // of truth — the client just renders + persists user toggles back.
+  getSkills: (): Promise<{ skills: Skill[] }> => http('GET', '/skills'),
+  saveSkills: (skills: Skill[]): Promise<{ skills: Skill[] }> =>
+    http('PUT', '/skills', { skills }),
+
+  // Project file ops (anchored to the active repo). All paths are relative
+  // to the project root; absolute / `..` paths get rejected server-side.
+  projectFileTree: (opts?: { dir?: string; depth?: number; exclude?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.dir) qs.set('dir', opts.dir);
+    if (opts?.depth != null) qs.set('depth', String(opts.depth));
+    if (opts?.exclude) qs.set('exclude', opts.exclude);
+    const tail = qs.toString();
+    return http<ProjectFileTreeNode>('GET', `/project/file-tree${tail ? `?${tail}` : ''}`);
+  },
+  readProjectFile: (path: string): Promise<ProjectFileContent> =>
+    http('GET', `/project/file?path=${encodeURIComponent(path)}`),
+  writeProjectFile: (path: string, content: string) =>
+    http<{ ok: true; path: string; written: number }>('POST', '/project/file', { path, content }),
+  deleteProjectFile: (path: string) =>
+    http<{ ok: true; path: string }>('DELETE', `/project/file?path=${encodeURIComponent(path)}`),
+  searchProject: (q: string, opts?: { path?: string; fileTypes?: string }) => {
+    const qs = new URLSearchParams({ q });
+    if (opts?.path) qs.set('path', opts.path);
+    if (opts?.fileTypes) qs.set('fileTypes', opts.fileTypes);
+    return http<ProjectSearchHit[]>('GET', `/project/search?${qs.toString()}`);
+  },
+
+  // Run a shell command in the project root. 30s default timeout.
+  terminalRun: (req: TerminalRunRequest): Promise<TerminalRunResult> =>
+    http('POST', '/terminal/run', req),
 
   // In-app folder browser — replaces the manual path input with a real picker.
   fsBrowse: (path?: string, showHidden = false): Promise<FsBrowseResult> => {

@@ -227,10 +227,14 @@ code,
 .app {
   display: grid;
   grid-template-rows: var(--top-h) 1fr;
-  grid-template-columns: var(--side-w) 1fr var(--pages-w);
+  /* Five columns: sidebar | splitter | main (1fr) | splitter | pages.
+     Sidebar and pages widths come in inline at runtime so the user can
+     drag-resize them. CSS-var fallback keeps the layout sane during the
+     first paint before React hydrates. */
+  grid-template-columns: var(--side-w) 6px 1fr 6px var(--pages-w);
   grid-template-areas:
-    "top top top"
-    "side main pages";
+    "top  top   top  top   top"
+    "side splv1 main splv2 pages";
   height: 100vh;
   overflow: hidden;
   background: var(--page);
@@ -264,6 +268,15 @@ code,
   overflow: hidden;
   background: var(--bg);
   border-left: 1px solid var(--border);
+}
+/* Splitters live in their own grid cells so they don't shrink the main
+   pane unexpectedly. Naming them lets us position by area without caring
+   about source order. */
+.app-splitter-left {
+  grid-area: splv1;
+}
+.app-splitter-right {
+  grid-area: splv2;
 }
 
 /* =============================================================================
@@ -1731,3 +1744,1008 @@ code,
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* =============================================================================
+   Debug mode — embedded browser + log panel + AI agent
+   Layout shape:
+     .dbg-app
+       └ .topnav-area (shared TopNav)
+       └ .dbg-main
+           ├ .dbg-left   = browser stacked above log panel
+           └ .dbg-right  = AI agent column
+   ============================================================================= */
+.dbg-app {
+  display: grid;
+  grid-template-rows: var(--top-h) 1fr;
+  grid-template-areas:
+    "dbgtop"
+    "dbgmain";
+  height: 100vh;
+  width: 100vw;
+  background: var(--page);
+  color: var(--fg-body);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+.dbg-topnav {
+  grid-area: dbgtop;
+  min-width: 0;
+}
+/* The right column width is plugged in by useSplitter (inline style) so the
+   user can drag the divider to resize it. We just declare the grid template
+   shape — three columns: elastic browser | thin splitter | sized AI panel. */
+.dbg-main {
+  grid-area: dbgmain;
+  display: grid;
+  grid-template-rows: 1fr;
+  /* Columns are set inline at runtime: "1fr 6px <ai-px>". This is the
+     fallback for the brief moment before React hydrates. */
+  grid-template-columns: 1fr 6px 360px;
+  min-height: 0;
+  min-width: 0;
+  gap: 0; /* gap collapsed — splitter itself is the visual gutter */
+  padding: 12px;
+}
+/* Browser eats the entire left column now (the bottom log strip moved
+   into the AI panel as just a small "captured N" badge). */
+.dbg-left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* Anchor the recording toast (an absolutely-positioned child) to this
+     pane so it sits centered over the browser, not over the AI panel. */
+  position: relative;
+}
+.dbg-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+/* =============================================================================
+   Splitter — draggable resizer between two panes.
+
+   Visual behaviour:
+     - Sits as a thin (6px) gutter between two panes.
+     - On hover the inner handle wash widens slightly + tints brand-soft so
+       the user sees that it's grabbable.
+     - The col-resize / row-resize cursor is set on the strip AND propagated
+       via a transparent shield during the drag (handled in JS).
+   ============================================================================= */
+.splitter {
+  position: relative;
+  flex: 0 0 auto;
+  background: transparent;
+  user-select: none;
+  z-index: 2;
+  /* Stretch to fill the grid cell / flex row regardless of content. */
+  align-self: stretch;
+  justify-self: stretch;
+}
+.splitter-vertical {
+  width: 6px;
+  cursor: col-resize;
+}
+.splitter-horizontal {
+  height: 6px;
+  cursor: row-resize;
+}
+.splitter .splitter-handle {
+  position: absolute;
+  background: transparent;
+  transition: background var(--transition);
+  border-radius: 999px;
+}
+.splitter-vertical .splitter-handle {
+  top: 12px;
+  bottom: 12px;
+  left: 2px;
+  right: 2px;
+}
+.splitter-horizontal .splitter-handle {
+  left: 12px;
+  right: 12px;
+  top: 2px;
+  bottom: 2px;
+}
+.splitter:hover .splitter-handle,
+.splitter:active .splitter-handle {
+  background: var(--brand-soft);
+}
+
+/* ---- embedded browser ---- */
+.dbg-browser {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Fill the .dbg-left flex column. Without this the browser shrinks to its
+     content height (just the URL bar) and the rest of the column is empty
+     — regression from when .dbg-left was a 2-row grid w/ a log panel. */
+  flex: 1 1 auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.dbg-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.dbg-browser-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--soft-gray);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--fg-body);
+  outline: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.dbg-browser-url:focus {
+  background: var(--bg);
+  border-color: var(--brand);
+}
+.dbg-browser-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: var(--bg);
+  display: block;
+}
+/* Self-loop / "you pointed me at gittttt itself" empty state. Rendered in
+   place of the iframe — same flex slot so the chrome above it stays put. */
+.dbg-browser-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 40px;
+  text-align: center;
+  color: var(--fg-secondary);
+}
+.dbg-browser-empty-icon {
+  color: var(--brand);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--brand-tint);
+  margin-bottom: 4px;
+}
+.dbg-browser-empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-primary);
+}
+.dbg-browser-empty-msg {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  max-width: 440px;
+  line-height: 1.5;
+}
+.dbg-browser-empty-hint {
+  font-size: 12.5px;
+  color: var(--fg-secondary);
+  max-width: 440px;
+  line-height: 1.6;
+}
+.dbg-browser-empty-hint code {
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--soft-gray);
+  color: var(--fg-primary);
+}
+.dbg-browser-empty-shortcuts {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+}
+.dbg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.dbg-icon-btn:hover {
+  background: var(--soft-gray);
+  color: var(--fg-primary);
+}
+@keyframes dbgRecPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); }
+  50%      { box-shadow: 0 0 0 4px rgba(225, 29, 72, 0); }
+}
+
+/* ---- shared text button (kept after deleting LogPanel) ---- */
+/* Used by AIAgentPanel for "密钥 / 清空对话 / 复制日志 / 清空日志" pills.
+   Lives outside the LogPanel block now since LogPanel was retired. */
+.dbg-text-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.dbg-text-btn:hover {
+  background: var(--soft-gray);
+  color: var(--fg-primary);
+}
+.dbg-text-btn.warn:hover {
+  color: var(--error);
+}
+
+/* ---- AI agent panel ---- */
+.dbg-ai {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  /* Anchor for .dbg-skills-overlay (absolutely positioned over chat). */
+  position: relative;
+}
+.dbg-ai-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.dbg-ai-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.dbg-ai-config {
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dbg-ai-config-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.dbg-ai-key-input {
+  font-family: var(--font-code);
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg-body);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.dbg-ai-key-input:focus {
+  border-color: var(--brand);
+}
+.dbg-ai-config-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dbg-ai-hint {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.55;
+}
+.dbg-primary-btn {
+  background: var(--brand);
+  color: white;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background var(--transition), opacity var(--transition);
+}
+.dbg-primary-btn:hover {
+  background: var(--brand-deep);
+}
+.dbg-primary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dbg-ai-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dbg-ai-empty {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 32px 16px;
+}
+.dbg-ai-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+.dbg-ai-msg-role {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dbg-ai-msg-body {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--soft-gray);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.dbg-ai-msg.role-user .dbg-ai-msg-body {
+  background: var(--brand-tint);
+  color: var(--brand-deep);
+}
+.dbg-ai-dots {
+  display: inline-flex;
+  gap: 4px;
+  padding: 12px;
+  background: var(--soft-gray);
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+.dbg-ai-dots > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  animation: dbg-dot 1.2s infinite;
+}
+.dbg-ai-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.dbg-ai-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dbg-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+.dbg-ai-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px 14px 14px;
+  /* Border lives on .dbg-ai-composer (parent) so it sits above any
+     pending-attachment row instead of between the row and the textarea. */
+}
+.dbg-ai-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  padding: 8px 10px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-body);
+  background: var(--soft-gray);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.dbg-ai-input:focus {
+  background: var(--bg);
+  border-color: var(--brand);
+}
+.dbg-send-btn {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+.dbg-ai-error {
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--error);
+  background: rgba(255, 59, 48, 0.08);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  word-break: break-word;
+}
+
+/* ---- AI agent — composer + log attachment chips ---- */
+
+/* Wraps the pending-attachments row + textarea so they share the same
+   border-top divider and padding from the chat list. */
+.dbg-ai-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Inline ✕ on user message bubbles. Hidden until hover so scrolling
+   through chat history stays clean. */
+.dbg-ai-msg-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+}
+.dbg-ai-msg.role-user:hover .dbg-ai-msg-del { opacity: 1; }
+.dbg-ai-msg-del:hover {
+  background: var(--soft-gray);
+  color: var(--error);
+}
+
+/* The horizontal row of attachment chips. Two contexts:
+     - .dbg-attach-row          (above the textarea — pending pills)
+     - .dbg-attach-row.in-msg   (inside a user message bubble — sent) */
+.dbg-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+.dbg-attach-row.in-msg {
+  padding: 6px 0 0;
+}
+
+/* DeepSeek-style file pill. Neutral gray, file icon, two stacked text
+   lines (name + EXT · size). The ✕ floats outside the top-right corner
+   on its own circular plate when the chip is removable. The whole left
+   region is a button — click anywhere on it (except ✕) to open the
+   preview overlay with the file's content. */
+.dbg-attach-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: var(--soft-gray);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  max-width: 100%;
+  transition: border-color var(--transition), background var(--transition);
+}
+.dbg-attach-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+.dbg-attach-chip-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+.dbg-attach-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-secondary);
+  flex: 0 0 auto;
+}
+.dbg-attach-chip:hover .dbg-attach-chip-icon { background: var(--soft-gray); }
+.dbg-attach-chip-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  max-width: 220px;
+}
+.dbg-attach-chip-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-primary);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dbg-attach-chip-sub {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+.dbg-attach-chip-close {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow-card, 0 1px 2px rgba(0,0,0,0.06));
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.dbg-attach-chip-close:hover {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}
+
+/* Composer right-side action stack: paperclip + send, both anchored to
+   the bottom of the textarea so they line up with the last visible row. */
+.dbg-ai-actions {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4px;
+  align-self: stretch;
+  padding-bottom: 0;
+}
+.dbg-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.dbg-attach-btn:hover {
+  background: var(--soft-gray);
+  color: var(--fg-primary);
+}
+
+/* Attachment preview overlay — opens when the user clicks a chip body.
+   Fixed full-screen backdrop + centred card with header + scrollable
+   monospace body. Click backdrop or ✕ (or press Esc) to close. */
+.dbg-attach-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: dbgFadeIn 120ms ease-out;
+}
+.dbg-attach-preview {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  max-height: min(720px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover, 0 12px 40px rgba(0, 0, 0, 0.25));
+  overflow: hidden;
+}
+.dbg-attach-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--soft-gray);
+}
+.dbg-attach-preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dbg-attach-preview-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dbg-attach-preview-sub {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.dbg-attach-preview-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.dbg-attach-preview-close:hover {
+  background: var(--bg);
+  color: var(--fg-primary);
+}
+.dbg-attach-preview-body {
+  margin: 0;
+  padding: 16px 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--font-code);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg);
+}
+@keyframes dbgFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* =============================================================================
+   AI agent — tool-call & tool-result chips inside chat bubbles.
+
+   When the assistant asks for or receives a tool call we render a compact
+   monospace block with a small icon so it stands out from prose. Default
+   collapsed (showing the tool name + summary), the user can click to expand.
+   ============================================================================= */
+.dbg-tool-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--fg-secondary);
+}
+.dbg-tool-block.role-tool {
+  background: var(--soft-gray);
+}
+.dbg-tool-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg-primary);
+  font-weight: 600;
+  font-size: 11.5px;
+}
+.dbg-tool-block-head .dbg-tool-name {
+  color: var(--brand);
+}
+.dbg-tool-block-head .dbg-tool-status {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 500;
+  font-size: 10.5px;
+}
+.dbg-tool-status.ok {
+  color: var(--success);
+  background: rgba(29, 158, 117, 0.12);
+}
+.dbg-tool-status.err {
+  color: var(--error);
+  background: rgba(216, 90, 48, 0.12);
+}
+.dbg-tool-block-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-sm);
+}
+:root[data-theme="dark"] .dbg-tool-block-body {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* =============================================================================
+   Skills panel overlay (lives inside .dbg-ai container).
+   Pops up over the chat scroll area when the user hits the gear icon.
+   ============================================================================= */
+.dbg-skills-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.dbg-skills-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.dbg-skills-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.dbg-skills-close {
+  margin-left: auto;
+}
+.dbg-skills-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 16px;
+}
+.dbg-skills-section {
+  padding: 12px 16px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.dbg-skill-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.dbg-skill-row:last-child {
+  border-bottom: 0;
+}
+.dbg-skill-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--soft-gray);
+  color: var(--brand);
+}
+.dbg-skill-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dbg-skill-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+.dbg-skill-desc {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.dbg-skill-perms {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dbg-skill-perm {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  color: var(--brand-deep);
+  font-weight: 500;
+}
+.dbg-skill-toggle-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* iOS-ish toggle */
+.dbg-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background var(--transition);
+  border: 0;
+  padding: 0;
+}
+.dbg-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--transition);
+}
+.dbg-toggle.on {
+  background: var(--brand);
+}
+.dbg-toggle.on::after {
+  transform: translateX(16px);
+}
+.dbg-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dbg-skill-delete {
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition);
+}
+.dbg-skill-delete:hover {
+  color: var(--error);
+  background: rgba(216, 90, 48, 0.08);
+}
+.dbg-skill-add {
+  margin: 12px 16px 0;
+  width: calc(100% - 32px);
+}
+/* Add-skill modal — reuses existing .modal-overlay backdrop */
+.dbg-skill-modal {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+}
+.dbg-skill-modal-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.dbg-skill-field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+  margin-bottom: 4px;
+  display: block;
+}
+.dbg-skill-field-input,
+.dbg-skill-field-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-body);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.dbg-skill-field-textarea {
+  min-height: 64px;
+  resize: vertical;
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+.dbg-skill-field-input:focus,
+.dbg-skill-field-textarea:focus {
+  border-color: var(--brand);
+}
+.dbg-skill-perm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+}
+.dbg-skill-perm-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-body);
+  cursor: pointer;
+  user-select: none;
+}
+.dbg-skill-perm-check input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--brand);
+}
+

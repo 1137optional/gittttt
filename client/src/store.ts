@@ -11,6 +11,22 @@ import { api } from './api';
 
 const PAGE_SIZE = 300;
 const TABS_STORAGE_KEY = 'gittttt:tabs';
+const MODE_STORAGE_KEY = 'gittttt:mode';
+
+export type AppMode = 'debug' | 'graph';
+
+function readPersistedMode(): AppMode {
+  if (typeof localStorage === 'undefined') return 'debug';
+  try {
+    const v = localStorage.getItem(MODE_STORAGE_KEY);
+    if (v === 'debug' || v === 'graph') return v;
+  } catch {
+    /* fall through to default */
+  }
+  // Spec default: cold-start lands in debug. The user can flip to graph mode
+  // and that choice will be remembered for the next session.
+  return 'debug';
+}
 
 interface Toast {
   id: number;
@@ -95,6 +111,12 @@ interface AppState {
   theme: 'light' | 'dark';
   setTheme(theme: 'light' | 'dark'): void;
   toggleTheme(): void;
+  /** Top-level workspace mode. 'debug' is the embedded-browser + log + AI
+   *  panel; 'graph' is the original Git visualisation view. The mode toggle
+   *  in TopNav cycles between the two and persists to localStorage. */
+  currentMode: AppMode;
+  setCurrentMode(mode: AppMode): void;
+  toggleMode(): void;
 
   // ui state
   isLoading: boolean;        // global blocker for pull/push/sync
@@ -328,6 +350,19 @@ export const useApp = create<AppState>((set, get) => {
       const next = get().theme === 'dark' ? 'light' : 'dark';
       applyTheme(next);
       set({ theme: next });
+    },
+    currentMode: readPersistedMode(),
+    setCurrentMode(mode) {
+      try {
+        localStorage.setItem(MODE_STORAGE_KEY, mode);
+      } catch {
+        /* ignore */
+      }
+      set({ currentMode: mode });
+    },
+    toggleMode() {
+      const next: AppMode = get().currentMode === 'debug' ? 'graph' : 'debug';
+      get().setCurrentMode(next);
     },
     isLoading: false,
     loadingMore: false,

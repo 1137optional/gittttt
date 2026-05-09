@@ -28,7 +28,20 @@ export type IconName =
   | 'folder'
   | 'folder-git'
   | 'arrow-up'
-  | 'home';
+  | 'home'
+  | 'bug'
+  | 'play'
+  | 'stop'
+  | 'send'
+  | 'sparkles'
+  | 'key'
+  | 'gear'
+  | 'terminal'
+  | 'file'
+  | 'tool'
+  | 'copy'
+  | 'paperclip'
+  | 'puzzle';
 
 interface PathSpec {
   d: string;
@@ -70,6 +83,33 @@ const PATHS: Record<IconName, PathSpec | PathSpec[]> = {
   'folder-git': { d: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z M9 13v4 M9 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4z M15 13v-1a2 2 0 0 0-2-2 M9 17a2 2 0 1 0 0 .01 M15 13a2 2 0 1 0 0 .01' },
   'arrow-up': { d: 'M12 19V5 M5 12l7-7 7 7' },
   home: { d: 'M3 11l9-7 9 7 M5 10v10h14V10' },
+  // Beetle-shaped bug — head + body + 6 legs + 2 antennae. Reads as "debug"
+  // at 16-24px without leaning on emoji.
+  bug: {
+    d: 'M9 5l1.5 1.5 M15 5l-1.5 1.5 M8.5 7.5h7 M7 12h10 M7 12a5 5 0 0 1 10 0v3a5 5 0 0 1-10 0v-3z M3 11l4 1 M3 16l4-1 M21 11l-4 1 M21 16l-4-1 M9 19l-1 2 M15 19l1 2',
+  },
+  play: { d: 'M7 5v14l12-7L7 5z', fill: true },
+  stop: { d: 'M6 6h12v12H6z', fill: true },
+  send: { d: 'M4 12l16-8-6 16-3-7-7-1z' },
+  sparkles: { d: 'M12 4l1.5 4.5L18 10l-4.5 1.5L12 16l-1.5-4.5L6 10l4.5-1.5L12 4z M19 15l.7 2.1L22 18l-2.3.9L19 21l-.7-2.1L16 18l2.3-.9L19 15z' },
+  key: { d: 'M14 9a4 4 0 1 1-3 6.7L4 21H2v-2l6.3-7A4 4 0 1 1 14 9z M16 7l1 1' },
+  // 8-spoke cog with a center hole. Reads as "settings" at small sizes.
+  gear: {
+    d: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2',
+  },
+  // Terminal prompt: window outline + chevron + cursor underline.
+  terminal: { d: 'M3 5h18v14H3z M7 9l3 3-3 3 M13 15h5' },
+  // Document with one folded corner.
+  file: { d: 'M7 3h8l4 4v14H7z M15 3v4h4' },
+  // Wrench, used for "tool call" labels in chat.
+  tool: { d: 'M14 6a4 4 0 1 1 4 4l-9 9-3 1 1-3z M13 7l4 4' },
+  // Two stacked rectangles — the standard "copy to clipboard" affordance.
+  copy: { d: 'M9 3h10v14H9z M5 7v14h12' },
+  // Diagonal paperclip — used for the file-attach button next to send.
+  paperclip: { d: 'M21 11l-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 1 1 5 5l-9 9a2 2 0 1 1-3-3l8-8' },
+  // Puzzle piece — the universal "browser extension" affordance. Used in
+  // the install-guide modal header + the URL-bar status pill (alt to dot).
+  puzzle: { d: 'M11 3a2 2 0 1 1 4 0v2h4v4a2 2 0 1 0 0 4v4h-4a2 2 0 1 1-4 0H7v-4a2 2 0 1 1 0-4V5a2 2 0 0 1 2-2h2z' },
 };
 
 interface Props {

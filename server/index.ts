@@ -8,6 +8,18 @@ import { GitHubService } from './githubService.js';
 import { browseDirectory } from './fsBrowser.js';
 import { RepoWatcher } from './repoWatcher.js';
 import { recordRecentRepo } from './recentRepos.js';
+import { aiChat } from './aiService.js';
+import { readSkills, writeSkills } from './skillsStore.js';
+import {
+  deleteProjectFile,
+  getFileTree,
+  ProjectFilesError,
+  readProjectFile,
+  searchProject,
+  writeProjectFile,
+} from './projectFilesService.js';
+import { ensureRoot, runCommand, TerminalError } from './terminalService.js';
+import type { AIChatRequest, Skill, TerminalRunRequest } from '../shared/types.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 // Default to loopback only — this server has no auth and grants full read/write
@@ -92,20 +104,27 @@ function ah<T>(
 }
 
 const app = express();
-// Strict CORS allowlist. Without this, any web page the user visited could
-// fetch http://localhost:3001/api/repo/open with a malicious path and get
-// the local Git agent to operate on it (no SOP protection because we'd
-// echo Access-Control-Allow-Origin: *). The allowlist + reflected origin
-// pattern blocks third-party origins at the preflight stage.
+
+// -----------------------------------------------------------------------------
+// CORS — strict allowlist. Without this, any web page the user visited
+// could fetch http://localhost:3001/api/repo/open with a malicious path
+// and get the local Git agent to operate on it. The allowlist + reflected-
+// origin pattern blocks third-party origins at the preflight stage.
+// Same-origin / no-Origin requests (server-side curl, native apps) are
+// allowed because they aren't subject to the browser's CORS policy.
+// -----------------------------------------------------------------------------
 app.use(
-  cors({
-    origin: (origin, cb) => {
-      // Same-origin requests (no Origin header) are fine.
-      if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      cb(new Error(`Origin not allowed: ${origin}`));
-    },
-    credentials: false,
+  cors((req, cb) => {
+    const origin = req.headers.origin;
+    if (!origin) {
+      cb(null, { origin: true, credentials: false });
+      return;
+    }
+    if (ALLOWED_ORIGINS.has(origin)) {
+      cb(null, { origin: true, credentials: false });
+      return;
+    }
+    cb(new Error(`Origin not allowed: ${origin}`));
   }),
 );
 app.use(express.json({ limit: '5mb' }));
@@ -461,6 +480,140 @@ app.get(
 );
 
 // -----------------------------------------------------------------------------
+// AI chat proxy (debug mode). The browser POSTs its API key + chat history;
+// we forward to DeepSeek and return the assistant's text. The key is never
+// stored — the client re-sends it from its own localStorage on every call.
+// -----------------------------------------------------------------------------
+app.post(
+  '/api/ai/chat',
+  ah(async (req, res) => {
+    const body = req.body as AIChatRequest;
+    if (!body || typeof body !== 'object') {
+      res.status(400).json({ error: 'Body must be an AIChatRequest object.' });
+      return;
+    }
+    res.json(await aiChat(body));
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// Skills catalog (drives the AI agent's tool surface). Persisted in
+// ~/.gittttt/skills.json so the server is the source of truth for what the
+// AI is allowed to do — the client just toggles flags.
+// -----------------------------------------------------------------------------
+app.get('/api/skills', ah(async (_req, res) => res.json({ skills: readSkills() })));
+
+app.put(
+  '/api/skills',
+  ah(async (req, res) => {
+    const body = req.body as { skills?: Skill[] };
+    if (!body || !Array.isArray(body.skills)) {
+      res.status(400).json({ error: 'body.skills must be an array' });
+      return;
+    }
+    res.json({ skills: writeSkills(body.skills) });
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// Project filesystem + terminal (the AI agent's hands & feet).
+//
+// Project root resolution: every request needs a "where am I" anchor. We
+// derive that from the currently-attached repo so the AI is always pointed
+// at the project the user is looking at. An advanced caller can override
+// with the X-Project-Root header — we still validate that it points at an
+// existing directory.
+// -----------------------------------------------------------------------------
+function resolveProjectRoot(req: Request): string {
+  const override = req.header('x-project-root');
+  return ensureRoot(override && override.trim() !== '' ? override.trim() : activeRepoPath);
+}
+
+app.get(
+  '/api/project/file-tree',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    res.json(
+      getFileTree(root, {
+        dir: typeof req.query.dir === 'string' ? req.query.dir : undefined,
+        depth: req.query.depth ? parseInt(String(req.query.depth), 10) : undefined,
+        exclude: typeof req.query.exclude === 'string' ? req.query.exclude : undefined,
+      }),
+    );
+  }),
+);
+
+app.get(
+  '/api/project/file',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    const path = typeof req.query.path === 'string' ? req.query.path : '';
+    if (!path) {
+      res.status(400).json({ error: 'path query param is required' });
+      return;
+    }
+    res.json(await readProjectFile(root, path));
+  }),
+);
+
+app.post(
+  '/api/project/file',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    const { path, content } = (req.body ?? {}) as { path?: string; content?: string };
+    if (!path || typeof path !== 'string') {
+      res.status(400).json({ error: 'body.path is required' });
+      return;
+    }
+    if (typeof content !== 'string') {
+      res.status(400).json({ error: 'body.content must be a string' });
+      return;
+    }
+    const result = await writeProjectFile(root, path, content);
+    res.json({ ok: true, ...result });
+  }),
+);
+
+app.delete(
+  '/api/project/file',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    // Some HTTP libs strip DELETE bodies, so accept ?path= as well.
+    const fromBody = (req.body ?? {}) as { path?: string };
+    const path = fromBody.path ?? (typeof req.query.path === 'string' ? req.query.path : '');
+    if (!path) {
+      res.status(400).json({ error: 'path is required' });
+      return;
+    }
+    const result = await deleteProjectFile(root, path);
+    res.json({ ok: true, ...result });
+  }),
+);
+
+app.get(
+  '/api/project/search',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    res.json(
+      await searchProject(root, {
+        query: q,
+        path: typeof req.query.path === 'string' ? req.query.path : undefined,
+        fileTypes: typeof req.query.fileTypes === 'string' ? req.query.fileTypes : undefined,
+      }),
+    );
+  }),
+);
+
+app.post(
+  '/api/terminal/run',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    res.json(await runCommand(root, (req.body ?? {}) as TerminalRunRequest));
+  }),
+);
+
+// -----------------------------------------------------------------------------
 // In-app folder browser (drives the "open any folder" UI without a path
 // input). Returns subdirectories of `path` (defaulting to $HOME), each
 // flagged with whether it's a git repo.
@@ -525,7 +678,17 @@ if (IS_PRODUCTION) {
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {
   // eslint-disable-next-line no-console
   console.error('[gittttt][api error]', err.message);
-  res.status(500).json({ error: err.message });
+  // Pass through structured HTTP statuses from our typed error classes
+  // (ProjectFilesError, TerminalError) so the client can show 404/403/etc.
+  // properly instead of every error becoming a 500.
+  let status = 500;
+  if (err instanceof ProjectFilesError || err instanceof TerminalError) {
+    status = err.status;
+  } else {
+    const maybeStatus = (err as unknown as { status?: unknown }).status;
+    if (typeof maybeStatus === 'number') status = maybeStatus;
+  }
+  res.status(status).json({ error: err.message });
 });
 
 // -----------------------------------------------------------------------------
