@@ -236,17 +236,17 @@ code,
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-/* Topnav brand: text-only, doubles as the click target for the repo
-   switcher (the standalone "G" mark was removed). */
+/* Topnav brand: text block + chevron, doubles as the click target for the
+   repo switcher overlay. The chevron is the affordance that says "this is a
+   menu trigger, not a static label". */
 .topnav-brand {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 10px 4px 8px;
   border-radius: 6px;
   text-align: left;
   line-height: 1.15;
@@ -254,6 +254,12 @@ code,
 }
 .topnav-brand:hover {
   background: var(--soft-gray);
+}
+.topnav-brand-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
 }
 .topnav-brand .title {
   font-size: 15px;
@@ -266,6 +272,15 @@ code,
   color: var(--fg-muted);
   font-family: var(--font-code);
   margin-top: 2px;
+}
+.topnav-brand-chev {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  transition: color var(--transition), transform var(--transition);
+}
+.topnav-brand:hover .topnav-brand-chev {
+  color: var(--fg-secondary);
+  transform: translateY(1px);
 }
 .topnav-spacer {
   flex: 1 1 auto;
@@ -998,6 +1013,35 @@ code,
   padding: 24px 20px;
   overflow-y: auto;
   background: var(--page);
+}
+/* Overlay variant — invoked from the TopNav while a repo is already open.
+   Sits on top of the main view via fixed positioning + a z-index above all
+   panels so it really takes over visually, with a soft scrim + a header
+   bar holding the close button. */
+.repo-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: var(--page);
+  /* Subtle separation from the underlying app while still feeling like a
+     full takeover (vs a tiny modal, which doesn't fit a picker this dense). */
+  box-shadow: 0 -2px 0 var(--border) inset;
+}
+.picker-overlay-bar {
+  width: 720px;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+.picker-overlay-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  letter-spacing: -0.01em;
+  flex: 1 1 auto;
 }
 .picker-grid {
   display: flex;

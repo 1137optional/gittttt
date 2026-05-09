@@ -37,6 +37,10 @@ interface AppState {
   //   'docs'     — Markdown-style doc page explaining the right-click menu
   leftPage: 'branches' | 'docs';
   setLeftPage(page: 'branches' | 'docs'): void;
+  /** When true, render the RepoPicker as a full-screen overlay even though
+   *  a repo is already attached (so the user can switch / clone / create). */
+  showRepoPicker: boolean;
+  setShowRepoPicker(v: boolean): void;
   /** Active visual theme. The flag is mirrored to <html data-theme=…> and
    *  persisted in localStorage; default follows the OS preference. */
   theme: 'light' | 'dark';
@@ -180,6 +184,10 @@ export const useApp = create<AppState>((set, get) => {
     setLeftPage(page) {
       set({ leftPage: page });
     },
+    showRepoPicker: false,
+    setShowRepoPicker(v) {
+      set({ showRepoPicker: v });
+    },
     theme: (() => {
       const t = readInitialTheme();
       // Sync the DOM immediately so the first paint already matches the
@@ -212,6 +220,10 @@ export const useApp = create<AppState>((set, get) => {
       await wrap(async () => {
         await api.openRepo(path);
         await reloadCore();
+        // Always dismiss the picker overlay on success — RepoPicker is a
+        // "destination", once you've reached it the user expects to land
+        // back in the main view.
+        set({ showRepoPicker: false });
         get().pushToast('success', `Opened repository at ${path}`);
       });
     },

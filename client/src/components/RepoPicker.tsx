@@ -22,7 +22,14 @@ import { Icon } from './Icon';
 const TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=repo,delete_repo&description=gittttt';
 
-export function RepoPicker(): JSX.Element {
+interface Props {
+  /** When provided, the picker behaves as a dismissable overlay (used when
+   *  invoked from the TopNav while a repo is already open). When absent, it
+   *  fills the screen as the cold-start landing page. */
+  onClose?: () => void;
+}
+
+export function RepoPicker({ onClose }: Props = {}): JSX.Element {
   const openRepo = useApp((s) => s.openRepo);
   const refreshAll = useApp((s) => s.refreshAll);
 
@@ -137,8 +144,33 @@ export function RepoPicker(): JSX.Element {
     }
   }
 
+  // ESC closes the overlay variant. The cold-start variant has no close
+  // semantics (there's no main view behind it).
+  useEffect(() => {
+    if (!onClose) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="repo-picker">
+    <div className={`repo-picker ${onClose ? 'repo-picker-overlay' : ''}`}>
+      {onClose ? (
+        <div className="picker-overlay-bar">
+          <h1 className="picker-overlay-title">切换仓库</h1>
+          <button
+            type="button"
+            className="topnav-action icon-only"
+            onClick={onClose}
+            title="关闭 (Esc)"
+            aria-label="关闭"
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      ) : null}
       <div className="picker-grid">
         {/* ---- GitHub section ---- */}
         <section className="picker-card">

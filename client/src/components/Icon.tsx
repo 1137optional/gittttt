@@ -20,7 +20,10 @@ export type IconName =
   | 'search'
   | 'external'
   | 'lock'
-  | 'globe';
+  | 'globe'
+  | 'chevron-down'
+  | 'swap'
+  | 'close';
 
 interface PathSpec {
   d: string;
@@ -51,6 +54,10 @@ const PATHS: Record<IconName, PathSpec | PathSpec[]> = {
   external: { d: 'M14 4h6v6 M20 4l-9 9 M5 8v11h11' },
   lock: { d: 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4' },
   globe: { d: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M3 12h18 M12 3a14 14 0 0 1 0 18 M12 3a14 14 0 0 0 0 18' },
+  'chevron-down': { d: 'M6 9l6 6 6-6' },
+  // Two-arrow swap, used by "switch repository" action.
+  swap: { d: 'M7 4l-3 3 3 3 M4 7h13a3 3 0 0 1 3 3v1 M17 20l3-3-3-3 M20 17H7a3 3 0 0 1-3-3v-1' },
+  close: { d: 'M6 6l12 12 M18 6L6 18' },
 };
 
 interface Props {

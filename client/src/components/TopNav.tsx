@@ -1,40 +1,51 @@
-import { useState } from 'react';
 import { useApp } from '../store';
 import { Icon } from './Icon';
-import { RepoSwitcher } from './RepoSwitcher';
 
 // Top navigation bar.
-//   - Title doubles as the click target for the repo switcher (the old
-//     standalone "G" brand mark was removed; the title carries the role).
-//   - Theme toggle (☀ / ☾ in SVG) + Refresh action on the right.
-//   - The legacy commit-message search popover was removed in this pass —
-//     it didn't survive the redesign, and `searchQuery` / `highlightedHashes`
-//     were dropped from the store at the same time. If we revive search, we'll
-//     own it as a dedicated overlay rather than crowding the topnav.
+//   - "Switch repository" button on the right opens the full RepoPicker
+//     overlay (GitHub list / local clones / paste a path), which is the only
+//     way to swap repos at runtime.
+//   - The brand area (title + repo name) is also clickable as a shortcut to
+//     the same overlay; the chevron next to it advertises that affordance.
+//   - Theme toggle (sun / moon) + Refresh action sit beside the switch button.
+//   - The legacy commit-message search popover and the bare RepoSwitcher
+//     modal were removed in earlier passes.
 export function TopNav(): JSX.Element {
   const repo = useApp((s) => s.repo);
   const refreshAll = useApp((s) => s.refreshAll);
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
-
-  const [showSwitcher, setShowSwitcher] = useState(false);
+  const setShowRepoPicker = useApp((s) => s.setShowRepoPicker);
 
   const repoName = repo?.path ? repo.path.split(/[\\/]/).filter(Boolean).pop() : '—';
+  const openPicker = (): void => setShowRepoPicker(true);
 
   return (
     <div className="topnav">
       <button
         type="button"
         className="topnav-brand"
-        onClick={() => setShowSwitcher(true)}
-        title={repo?.path ?? ''}
+        onClick={openPicker}
+        title={repo?.path ? `${repo.path} (点击切换仓库)` : '点击切换仓库'}
       >
-        <span className="title">GitFlow</span>
-        <span className="subtitle">{repoName}</span>
+        <span className="topnav-brand-text">
+          <span className="title">GitFlow</span>
+          <span className="subtitle">{repoName}</span>
+        </span>
+        <Icon name="chevron-down" size={14} className="topnav-brand-chev" />
       </button>
 
       <div className="topnav-spacer" />
 
+      <button
+        type="button"
+        className="topnav-action"
+        onClick={openPicker}
+        title="切换或新建仓库"
+      >
+        <Icon name="swap" size={14} />
+        <span>切换仓库</span>
+      </button>
       <button
         type="button"
         className="topnav-action icon-only"
@@ -53,8 +64,6 @@ export function TopNav(): JSX.Element {
       >
         <Icon name="refresh" size={16} />
       </button>
-
-      {showSwitcher ? <RepoSwitcher onClose={() => setShowSwitcher(false)} /> : null}
     </div>
   );
 }

@@ -12,6 +12,8 @@ export default function App(): JSX.Element {
   const repoOpen = useApp((s) => s.repoOpen);
   const init = useApp((s) => s.init);
   const refreshAll = useApp((s) => s.refreshAll);
+  const showRepoPicker = useApp((s) => s.showRepoPicker);
+  const setShowRepoPicker = useApp((s) => s.setShowRepoPicker);
 
   useEffect(() => {
     void init();
@@ -24,6 +26,8 @@ export default function App(): JSX.Element {
     return unsub;
   }, [refreshAll]);
 
+  // Cold-start: no repo attached → fill the screen with the picker (no
+  // close button, there's nothing to close back to).
   if (!repoOpen) {
     return (
       <>
@@ -54,6 +58,9 @@ export default function App(): JSX.Element {
             info, and stat cards on a tiny repo were noise. */}
         <WorkingChanges />
       </div>
+      {/* Switch-repo overlay — invoked from the TopNav. Sits on top of the
+          main view, dismissable via the X button or Escape. */}
+      {showRepoPicker ? <RepoPicker onClose={() => setShowRepoPicker(false)} /> : null}
       <ToastStack />
     </div>
   );
