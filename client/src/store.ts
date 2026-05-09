@@ -94,8 +94,8 @@ interface AppState {
   // Which page is shown in the LEFT sidebar.
   //   'branches' — the existing tree (branches / remotes / stash)
   //   'docs'     — Markdown-style doc page explaining the right-click menu
-  leftPage: 'branches' | 'docs';
-  setLeftPage(page: 'branches' | 'docs'): void;
+  leftPage: 'branches' | 'docs' | 'memory';
+  setLeftPage(page: 'branches' | 'docs' | 'memory'): void;
   /** When true, render the RepoPicker as a full-screen overlay even though
    *  a repo is already attached (so the user can switch / clone / create). */
   showRepoPicker: boolean;

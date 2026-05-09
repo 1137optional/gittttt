@@ -23,9 +23,11 @@ const PERM_LABELS: { key: keyof SkillPermissions; label: string }[] = [
   { key: 'canReadFiles', label: '读文件' },
   { key: 'canWriteFiles', label: '写文件' },
   { key: 'canRunTerminal', label: '终端' },
-  { key: 'canAccessLogs', label: '日志' },
   { key: 'canSearchCode', label: '搜索' },
   { key: 'canAccessGit', label: 'Git' },
+  { key: 'canMakeHttpRequests', label: 'HTTP' },
+  { key: 'canUseBrowser', label: '浏览器' },
+  { key: 'canAccessMemory', label: '记忆' },
 ];
 
 export function SkillsPanel({ skills, onChange, onClose }: Props): JSX.Element {
@@ -215,9 +217,11 @@ function AddSkillModal({ onCancel, onSave, existingIds }: AddProps): JSX.Element
     canReadFiles: false,
     canWriteFiles: false,
     canRunTerminal: false,
-    canAccessLogs: false,
     canSearchCode: false,
     canAccessGit: false,
+    canMakeHttpRequests: false,
+    canUseBrowser: false,
+    canAccessMemory: false,
   });
 
   function setPerm(k: keyof SkillPermissions, v: boolean): void {

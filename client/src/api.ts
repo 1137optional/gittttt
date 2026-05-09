@@ -2,14 +2,23 @@ import type {
   AIChatRequest,
   AIChatResponse,
   Branch,
+  BrowserConsoleEntry,
+  BrowserContentResult,
+  BrowserRequest,
+  BrowserScreenshotResult,
+  BrowserState,
   Commit,
   CreateGitHubRepoInput,
   FsBrowseResult,
   GitHubAuthStatus,
   GitHubRepoSummary,
+  HttpRequestArgs,
+  HttpRequestResult,
   LocalRepoSummary,
   ProjectFileContent,
   ProjectFileTreeNode,
+  ProjectMemory,
+  ProjectMemorySummary,
   ProjectSearchHit,
   RepoInfo,
   Skill,
@@ -147,9 +156,40 @@ export const api = {
     return http<ProjectSearchHit[]>('GET', `/project/search?${qs.toString()}`);
   },
 
-  // Run a shell command in the project root. 30s default timeout.
+  // Run a shell command in the project root. 30s default timeout, capped
+  // at 120s. Streams stdout/stderr internally; we return the buffered
+  // result once the process exits or hits the timeout.
   terminalRun: (req: TerminalRunRequest): Promise<TerminalRunResult> =>
     http('POST', '/terminal/run', req),
+
+  // AI httpRequest tool. The AI calls this to fetch URLs (any HTTP/HTTPS
+  // origin). Not a browser — no JS execution, no cookies kept across calls.
+  httpRequest: (args: HttpRequestArgs): Promise<HttpRequestResult> =>
+    http('POST', '/ai/http', args),
+
+  // AI browser tools. Single endpoint dispatches by `action`. The shared
+  // chromium instance lives server-side; calls are stateful (cookies /
+  // page state survive between calls). 5-minute idle auto-close.
+  browser: (req: BrowserRequest): Promise<
+    BrowserState
+    | BrowserScreenshotResult
+    | BrowserContentResult
+    | { entries: BrowserConsoleEntry[]; total: number }
+  > => http('POST', '/ai/browser', req),
+
+  // Project memory. One Markdown file per project, AI-managed but
+  // user-deletable. `getMemory` returns the active project's memory; the
+  // list endpoint returns every memory the user has ever stored (incl.
+  // ones whose project has since been deleted) so the Memory page can
+  // show + clean orphans.
+  getMemory: (): Promise<ProjectMemory> => http('GET', '/memory'),
+  getMemoryByKey: (key: string): Promise<ProjectMemory> => http('GET', `/memory/${key}`),
+  saveMemory: (content: string, mode: 'replace' | 'append' = 'replace'): Promise<ProjectMemory> =>
+    http('PUT', '/memory', { content, mode }),
+  deleteMemory: (key: string): Promise<{ ok: true; removed: boolean }> =>
+    http('DELETE', `/memory/${key}`),
+  listMemories: (): Promise<{ items: ProjectMemorySummary[] }> =>
+    http('GET', '/memory/list/all'),
 
   // In-app folder browser — replaces the manual path input with a real picker.
   fsBrowse: (path?: string, showHidden = false): Promise<FsBrowseResult> => {

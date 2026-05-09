@@ -29,8 +29,16 @@ import type { TerminalRunRequest, TerminalRunResult } from '../shared/types.js';
 // =============================================================================
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 60_000;
-const OUTPUT_CAP = 200_000; // chars per stream
+// Bumped from 60s → 120s. Many useful AI commands (npm install, git fetch on
+// big repos, build steps) overshoot 60s easily; the 30s default still applies
+// for ad-hoc calls, but the AI can opt up to 2 minutes when it knows it's
+// running something slow. Wall-clock only — anything stuck on a stuck child
+// still gets SIGKILLed at the cap.
+const MAX_TIMEOUT_MS = 120_000;
+// Per-stream cap. 200KB used to truncate `npm install` output mid-line; 500KB
+// is enough for typical build logs while still keeping a single result well
+// under our 5MB JSON body limit.
+const OUTPUT_CAP = 500_000;
 
 export class TerminalError extends Error {
   status: number;
@@ -113,10 +121,15 @@ export async function runCommand(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let truncated = false;
     const cap = (cur: string, chunk: string): string => {
-      if (cur.length >= OUTPUT_CAP) return cur;
+      if (cur.length >= OUTPUT_CAP) {
+        truncated = true;
+        return cur;
+      }
       const room = OUTPUT_CAP - cur.length;
       if (chunk.length <= room) return cur + chunk;
+      truncated = true;
       return `${cur}${chunk.slice(0, room)}\n…[output truncated]`;
     };
 
@@ -160,6 +173,7 @@ export async function runCommand(
         exitCode: code ?? (timedOut ? 124 : (signal ? 137 : -1)),
         duration: Date.now() - start,
         timedOut,
+        truncated: truncated || undefined,
       });
     });
   });

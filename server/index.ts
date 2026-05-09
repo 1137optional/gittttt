@@ -19,7 +19,18 @@ import {
   writeProjectFile,
 } from './projectFilesService.js';
 import { ensureRoot, runCommand, TerminalError } from './terminalService.js';
-import type { AIChatRequest, Skill, TerminalRunRequest } from '../shared/types.js';
+import { executeHttpRequest, HttpRequestError } from './httpService.js';
+import * as browserSvc from './browserService.js';
+import { BrowserError } from './browserService.js';
+import * as memorySvc from './memoryService.js';
+import { MemoryError } from './memoryService.js';
+import type {
+  AIChatRequest,
+  BrowserRequest,
+  HttpRequestArgs,
+  Skill,
+  TerminalRunRequest,
+} from '../shared/types.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 // Default to loopback only — this server has no auth and grants full read/write
@@ -79,6 +90,9 @@ function attachRepo(path: string): GitService {
     },
   });
   activeRepoPath = abs;
+  // Browser-tool screenshots get saved under the active repo's .gittttt/.
+  // Keep that location in sync whenever the active repo changes.
+  browserSvc.setProjectRoot(abs);
   watcher = new RepoWatcher(abs, () => broadcast('repoChanged'));
   watcher.start();
   // Persist into the "recent repos" history so the picker can list every
@@ -614,6 +628,150 @@ app.post(
 );
 
 // -----------------------------------------------------------------------------
+// AI httpRequest tool. Lets the model do "fetch this URL" without burning a
+// terminal call on `curl`. Body is HttpRequestArgs; response is the
+// HttpRequestResult shape (status/headers/body/durationMs).
+//
+// No project root needed — this is a network call, not a filesystem call.
+// Permission check is enforced client-side via the Skills system; same
+// trust model as /api/terminal/run.
+// -----------------------------------------------------------------------------
+app.post(
+  '/api/ai/http',
+  ah(async (req, res) => {
+    res.json(await executeHttpRequest((req.body ?? {}) as HttpRequestArgs));
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// AI browser tool. Single endpoint that dispatches to the right
+// browserService method based on `action`. Lazy-launches chromium on first
+// call; auto-closes after 5 minutes of idle.
+//
+// Action / args contract is documented in shared/types.ts (BrowserAction).
+// Each method returns its own typed result (BrowserState, ScreenshotResult,
+// ContentResult, console list); we don't wrap them so the AI sees structured
+// fields it can act on.
+// -----------------------------------------------------------------------------
+app.post(
+  '/api/ai/browser',
+  ah(async (req, res) => {
+    const body = (req.body ?? {}) as BrowserRequest;
+    if (!body || typeof body.action !== 'string') {
+      throw new BrowserError(400, 'request body must include { action, args? }');
+    }
+    const args = (body.args ?? {}) as Record<string, unknown>;
+    switch (body.action) {
+      case 'navigate':
+        return res.json(await browserSvc.navigate(args));
+      case 'click':
+        return res.json(await browserSvc.click(args));
+      case 'type':
+        return res.json(await browserSvc.type(args));
+      case 'screenshot':
+        return res.json(await browserSvc.screenshot(args));
+      case 'getConsole':
+        return res.json(await browserSvc.getConsole(args));
+      case 'getContent':
+        return res.json(await browserSvc.getContent(args));
+      case 'close':
+        return res.json(await browserSvc.closeBrowser());
+      default:
+        throw new BrowserError(400, `unknown browser action: ${body.action}`);
+    }
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// Screenshot static serving. Lives under the active repo's
+// .gittttt/screenshots/ — we expose it via /api/screenshot/:name so the
+// front-end can render the image alongside the AI's tool result.
+// -----------------------------------------------------------------------------
+app.get(
+  '/api/screenshot/:name',
+  ah(async (req, res) => {
+    const root = resolveProjectRoot(req);
+    const name = req.params.name;
+    if (!/^[\w.-]+\.png$/.test(name)) {
+      res.status(400).send('invalid screenshot name');
+      return;
+    }
+    const abs = join(root, '.gittttt', 'screenshots', name);
+    if (!existsSync(abs)) {
+      res.status(404).send('not found');
+      return;
+    }
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    res.sendFile(abs);
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// Project memory — per-project Markdown notes the AI manages.
+//
+//   GET    /api/memory             → memory for the active repo (key derived)
+//   GET    /api/memory/:key        → specific memory by sha1 key
+//   PUT    /api/memory             → write/replace memory for active repo
+//   DELETE /api/memory/:key        → permanently remove a stored memory
+//   GET    /api/memory/list/all    → list every stored memory (incl. orphans)
+//
+// Memory is keyed by sha1(absRepoPath) and survives the project being
+// removed. The "list/all" endpoint drives the left-sidebar Memory page,
+// which lets the user see / delete memories whose project is gone.
+// -----------------------------------------------------------------------------
+function activeRepoMemoryKey(): string {
+  if (!activeRepoPath) {
+    throw new MemoryError(409, 'no active project — open a repo first');
+  }
+  return memorySvc.memoryKeyForPath(activeRepoPath);
+}
+
+app.get('/api/memory/list/all', ah(async (_req, res) => {
+  res.json({ items: memorySvc.listMemories() });
+}));
+
+app.get('/api/memory', ah(async (_req, res) => {
+  const key = activeRepoMemoryKey();
+  const m = memorySvc.readMemory(key);
+  res.json(m ?? {
+    key,
+    content: '',
+    bytes: 0,
+    updatedAt: new Date(0).toISOString(),
+    repoPath: activeRepoPath,
+    repoExists: true,
+  });
+}));
+
+app.get('/api/memory/:key', ah(async (req, res) => {
+  const m = memorySvc.readMemory(req.params.key);
+  if (!m) {
+    res.status(404).json({ error: 'memory not found' });
+    return;
+  }
+  res.json(m);
+}));
+
+app.put('/api/memory', ah(async (req, res) => {
+  const key = activeRepoMemoryKey();
+  const body = (req.body ?? {}) as { content?: unknown; mode?: unknown };
+  if (typeof body.content !== 'string') {
+    throw new MemoryError(400, 'body must be { content: string, mode?: "replace"|"append" }');
+  }
+  const mode = body.mode === 'append' ? 'append' : 'replace';
+  const out = mode === 'append'
+    ? memorySvc.appendMemory(key, body.content, { repoPath: activeRepoPath ?? undefined })
+    : memorySvc.writeMemory(key, body.content, { repoPath: activeRepoPath ?? undefined });
+  res.json(out);
+}));
+
+app.delete('/api/memory/:key', ah(async (req, res) => {
+  const removed = memorySvc.deleteMemory(req.params.key);
+  res.json({ ok: true, removed });
+}));
+
+// -----------------------------------------------------------------------------
 // In-app folder browser (drives the "open any folder" UI without a path
 // input). Returns subdirectories of `path` (defaulting to $HOME), each
 // flagged with whether it's a git repo.
@@ -682,7 +840,13 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void =>
   // (ProjectFilesError, TerminalError) so the client can show 404/403/etc.
   // properly instead of every error becoming a 500.
   let status = 500;
-  if (err instanceof ProjectFilesError || err instanceof TerminalError) {
+  if (
+    err instanceof ProjectFilesError
+    || err instanceof TerminalError
+    || err instanceof HttpRequestError
+    || err instanceof BrowserError
+    || err instanceof MemoryError
+  ) {
     status = err.status;
   } else {
     const maybeStatus = (err as unknown as { status?: unknown }).status;
@@ -702,7 +866,7 @@ app.listen(PORT, HOST, () => {
       attachRepo(DEFAULT_REPO);
       // eslint-disable-next-line no-console
       console.log(`[gittttt] auto-opened repo: ${DEFAULT_REPO}`);
-    } catch (e) {
+    } catch {
       // eslint-disable-next-line no-console
       console.warn(
         `[gittttt] default path ${DEFAULT_REPO} is not a Git repo; open one via the UI.`,
@@ -710,3 +874,17 @@ app.listen(PORT, HOST, () => {
     }
   }
 });
+
+// Graceful shutdown — Playwright's chromium child process needs a clean
+// kill, otherwise it can survive the parent and squat on memory until the
+// OS reaps it. Chromium close is async; we wait briefly then exit anyway.
+function shutdown(signal: string): void {
+  // eslint-disable-next-line no-console
+  console.log(`[gittttt] ${signal} received, shutting down`);
+  Promise.race([
+    browserSvc.closeBrowser(),
+    new Promise((r) => setTimeout(r, 1500)),
+  ]).finally(() => process.exit(0));
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

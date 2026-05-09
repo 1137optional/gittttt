@@ -239,9 +239,28 @@ export interface SkillPermissions {
   canReadFiles: boolean;
   canWriteFiles: boolean;
   canRunTerminal: boolean;
-  canAccessLogs: boolean;
   canSearchCode: boolean;
   canAccessGit: boolean;
+  /** Make HTTP(S) requests to arbitrary URLs via the httpRequest tool.
+   *  Lets the AI hit local dev endpoints, public APIs, raw-HTML pages.
+   *  Cannot click / fill / interact — for that we'd need a real headless
+   *  browser. Off by default for the same reason as canRunTerminal: the
+   *  surface is wide, e.g. "POST your local DB API" type calls. */
+  canMakeHttpRequests: boolean;
+  /** Drive a real headless Chromium via Playwright. Lets the AI navigate,
+   *  click, fill, screenshot, and read F12 console logs of arbitrary pages
+   *  (including SPAs that need real JS execution). MUCH bigger trust
+   *  surface than canMakeHttpRequests — the browser carries cookies, runs
+   *  arbitrary site JS, and can take screenshots of whatever's loaded. Off
+   *  by default; enable only on machines where you're OK with the AI
+   *  driving an interactive browser. */
+  canUseBrowser: boolean;
+  /** Read AND write the per-project AI Memory (see ProjectMemory). With
+   *  this granted the AI can `readMemory` to load context on every turn,
+   *  and `writeMemory` / `appendMemory` to persist what it learned. The
+   *  memory survives the project being deleted; only the user can wipe
+   *  it from the Memory page. */
+  canAccessMemory: boolean;
 }
 
 export interface SkillTrigger {
@@ -293,7 +312,17 @@ export type ToolName =
   | 'deleteFile'
   | 'searchCode'
   | 'runCommand'
-  | 'gitOperation';
+  | 'gitOperation'
+  | 'httpRequest'
+  | 'browserNavigate'
+  | 'browserClick'
+  | 'browserType'
+  | 'browserScreenshot'
+  | 'browserGetConsole'
+  | 'browserGetContent'
+  | 'readMemory'
+  | 'writeMemory'
+  | 'appendMemory';
 
 export interface ToolDef {
   name: ToolName;
@@ -353,7 +382,7 @@ export interface TerminalRunRequest {
   command: string;
   /** Optional cwd, must be inside the active project root. Defaults to root. */
   cwd?: string;
-  /** Wall-clock timeout in ms. Server caps at 60_000 regardless. */
+  /** Wall-clock timeout in ms. Server caps at TERMINAL_MAX_TIMEOUT_MS. */
   timeout?: number;
 }
 
@@ -364,4 +393,149 @@ export interface TerminalRunResult {
   duration: number;
   /** Set when we killed the process due to the timeout. */
   timedOut?: boolean;
+  /** Set when we truncated the captured output to fit MAX_OUTPUT_BYTES. */
+  truncated?: boolean;
+}
+
+// =============================================================================
+// httpRequest tool — minimal fetch-style HTTP client the AI can call.
+// Not a browser: no cookies, no JS execution, no DOM. Just request/response.
+// For "click this button" / "what's in console" we'd need real Playwright.
+// =============================================================================
+
+export interface HttpRequestArgs {
+  url: string;
+  /** Defaults to "GET". Server only allows the standard verbs. */
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  /** Optional request headers. Authorization / cookies passed through verbatim. */
+  headers?: Record<string, string>;
+  /** Plain-text or JSON body. We don't introspect — sent as-is. */
+  body?: string;
+  /** Wall-clock timeout in ms. Server caps at HTTP_MAX_TIMEOUT_MS. */
+  timeoutMs?: number;
+}
+
+export interface HttpRequestResult {
+  status: number;
+  statusText: string;
+  /** Lower-cased keys for stable AI lookup. */
+  headers: Record<string, string>;
+  /** Decoded as UTF-8 text. Truncated to fit MAX_RESPONSE_BYTES. */
+  body: string;
+  /** Set when body was truncated (so AI knows there's more). */
+  truncated?: boolean;
+  /** Final URL after any redirects. */
+  url: string;
+  durationMs: number;
+}
+
+// =============================================================================
+// Browser tools — Playwright-driven real Chromium. The AI can:
+//   - navigate to a URL and wait for load,
+//   - click / type / press keys (CSS selector based),
+//   - screenshot the page (saved to .gittttt/screenshots/, AI gets the path),
+//   - read the rendered DOM text after JS has executed,
+//   - read F12 console messages and recent network requests.
+//
+// We keep ONE shared Chromium context — the same browser across all tool
+// calls, so cookies / login state survive between calls. After 5 minutes of
+// idle the browser auto-closes to free memory.
+//
+// The route is `POST /api/ai/browser` with `{ action, args }`. We dispatch
+// to the right method server-side. Errors throw `BrowserError` so the
+// global handler can surface a structured 4xx/5xx.
+// =============================================================================
+
+export type BrowserAction =
+  | 'navigate'
+  | 'click'
+  | 'type'
+  | 'screenshot'
+  | 'getConsole'
+  | 'getContent'
+  | 'close';
+
+export interface BrowserRequest {
+  action: BrowserAction;
+  args?: Record<string, unknown>;
+}
+
+export interface BrowserState {
+  /** URL the page is currently on. Empty string if no page yet. */
+  url: string;
+  /** Page title. Empty string if no page yet. */
+  title: string;
+  /** Wall-clock ms since the page finished loading (for the AI to know
+   *  whether what it last did had time to settle). */
+  loadedMs: number;
+  /** True once Playwright has the chromium browser process alive. */
+  alive: boolean;
+}
+
+export interface BrowserConsoleEntry {
+  /** Lower-case console level: log / info / warn / error / debug. */
+  level: string;
+  /** Concatenated text of all console arguments. */
+  text: string;
+  /** ISO timestamp on the server. */
+  time: string;
+  /** Source location reported by Chromium (file:line:col). May be empty. */
+  source?: string;
+}
+
+export interface BrowserScreenshotResult extends BrowserState {
+  /** Repo-relative path under .gittttt/screenshots/. AI gets a path string;
+   *  the front-end resolves it via /api/screenshot/:name to render. */
+  path: string;
+  bytes: number;
+  /** A short text outline of the rendered DOM (visible headings + buttons +
+   *  inputs + first paragraph). DeepSeek can't see images but can use this
+   *  to reason about what's on screen. */
+  domOutline: string;
+}
+
+export interface BrowserContentResult extends BrowserState {
+  /** Either the full visible body text or the text inside the supplied
+   *  selector. Truncated to BROWSER_MAX_TEXT chars. */
+  text: string;
+  /** Set when text was truncated. */
+  truncated?: boolean;
+}
+
+// =============================================================================
+// Project memory — one Markdown file per project that the AI manages.
+//
+// Lives in ~/.gittttt/notes/<sha1(absRepoPath)>.md so it follows the path
+// (not the project name) and survives the project folder being deleted.
+// User can view + delete from the left-sidebar Memory page; the AI reads
+// it on every turn and writes/appends to it as it learns the codebase.
+// =============================================================================
+
+export interface ProjectMemory {
+  /** sha1(absRepoPath) prefix — the on-disk filename stem. */
+  key: string;
+  /** Full Markdown content. May be empty. */
+  content: string;
+  bytes: number;
+  /** ISO timestamp of last write. */
+  updatedAt: string;
+  /** Original repo absolute path on disk (from the sidecar file). May be
+   *  null for very old entries that were created before sidecars existed. */
+  repoPath: string | null;
+  /** True when `repoPath` still exists on disk. False after the user
+   *  deleted the project but kept the memory. */
+  repoExists: boolean;
+  /** Set on writeMemory when the body had to be truncated to fit
+   *  HARD_BYTE_LIMIT. Surfaced to the AI so it can summarize. */
+  truncated?: boolean;
+}
+
+export interface ProjectMemorySummary {
+  key: string;
+  repoPath: string | null;
+  repoExists: boolean;
+  bytes: number;
+  updatedAt: string;
+  /** First non-empty line, capped — for the list view. */
+  excerpt: string;
 }

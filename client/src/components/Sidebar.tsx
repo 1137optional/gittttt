@@ -4,6 +4,7 @@ import { hashIndex, theme } from '../theme';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { Icon } from './Icon';
 import { LeftDocs } from './LeftDocs';
+import { LeftMemory } from './LeftMemory';
 import type { Branch } from '@shared/types';
 // Note: contributor / commit / branch / tag stats used to live in this
 // sidebar but were dropped — they didn't pull their visual weight and
@@ -119,11 +120,20 @@ export function Sidebar(): JSX.Element {
         >
           文档
         </button>
+        <button
+          type="button"
+          className={`left-nav-tab ${leftPage === 'memory' ? 'active' : ''}`}
+          onClick={() => setLeftPage('memory')}
+        >
+          记忆
+        </button>
       </div>
 
       <div className="sidebar-body">
         {leftPage === 'docs' ? (
           <LeftDocs />
+        ) : leftPage === 'memory' ? (
+          <LeftMemory />
         ) : (
           <>
       {/* ---- Branches ---- */}

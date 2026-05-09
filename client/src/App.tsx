@@ -7,6 +7,7 @@ import { CommitGraph } from './components/CommitGraph';
 import { WorkingChanges } from './components/WorkingChanges';
 import { RepoPicker } from './components/RepoPicker';
 import { ToastStack } from './components/ToastStack';
+import { StatusBar } from './components/StatusBar';
 import { DebugLayout } from './components/debug/DebugLayout';
 import { useSplitter } from './components/Splitter';
 
@@ -37,6 +38,7 @@ export default function App(): JSX.Element {
     return (
       <>
         <DebugLayout />
+        <StatusBar />
         {showRepoPicker ? <RepoPicker onClose={() => setShowRepoPicker(false)} /> : null}
         <ToastStack />
       </>
@@ -44,11 +46,13 @@ export default function App(): JSX.Element {
   }
 
   // Cold-start in graph mode: no repo attached → fill the screen with the
-  // picker (no close button — there's nothing to close back to).
+  // picker (no close button — there's nothing to close back to). Status
+  // bar still useful here for the mode/refresh affordances.
   if (!repoOpen) {
     return (
       <>
         <RepoPicker />
+        <StatusBar />
         <ToastStack />
       </>
     );
@@ -122,6 +126,7 @@ function GraphLayout({ showRepoPicker, setShowRepoPicker }: GraphLayoutProps): J
       {/* Switch-repo overlay — invoked from the TopNav. Sits on top of the
           main view, dismissable via the X button or Escape. */}
       {showRepoPicker ? <RepoPicker onClose={() => setShowRepoPicker(false)} /> : null}
+      <StatusBar />
       <ToastStack />
     </div>
   );

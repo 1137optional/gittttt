@@ -43,9 +43,11 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: false,
       canWriteFiles: false,
       canRunTerminal: false,
-      canAccessLogs: true,
       canSearchCode: false,
       canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: true, manual: true, keywords: ['日志', '报错', 'console', 'error'] },
     systemPrompt:
@@ -63,9 +65,11 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: true,
       canWriteFiles: false,
       canRunTerminal: false,
-      canAccessLogs: false,
       canSearchCode: false,
       canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: true, manual: false, keywords: [] },
     systemPrompt:
@@ -83,9 +87,11 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: false,
       canWriteFiles: true,
       canRunTerminal: false,
-      canAccessLogs: false,
       canSearchCode: false,
       canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: false, manual: true, keywords: ['修改', '创建', '写入', 'fix'] },
     systemPrompt:
@@ -95,7 +101,7 @@ const BUILTIN_SKILLS: Skill[] = [
   {
     id: 'core.terminal',
     name: '执行命令',
-    description: '在项目根目录下跑 shell 命令（30s 超时，危险命令会被拦）',
+    description: '在项目根跑 shell 命令（默认 30s、最长 120s 超时；危险命令会被拦）',
     icon: 'play',
     enabled: false,
     category: 'core',
@@ -103,14 +109,76 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: false,
       canWriteFiles: false,
       canRunTerminal: true,
-      canAccessLogs: false,
       canSearchCode: false,
       canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: false, manual: true, keywords: ['运行', '执行', 'npm', 'yarn', 'pnpm'] },
     systemPrompt:
-      'runCommand({command}) 在项目根执行。结果含 stdout / stderr / exitCode。'
-      + '不要重复执行同一条命令；如果要长时间跑的命令（dev server）请告诉用户手动起。',
+      'runCommand({command, cwd?, timeout?}) 在项目根执行。结果含 stdout / stderr / exitCode / duration。'
+      + '慢命令记得加 timeout（单位 ms，最大 120000）。'
+      + '不要重复执行同一条命令；常驻服务（dev server）请告诉用户手动起。',
+  },
+  {
+    id: 'core.http',
+    name: 'HTTP 请求',
+    description: '让 AI 直接 fetch 任意 URL（GET/POST/...）。不是浏览器，不会执行 JS、不保留 cookie',
+    icon: 'globe',
+    enabled: false,
+    category: 'core',
+    permissions: {
+      canReadFiles: false,
+      canWriteFiles: false,
+      canRunTerminal: false,
+      canSearchCode: false,
+      canAccessGit: false,
+      canMakeHttpRequests: true,
+      canUseBrowser: false,
+      canAccessMemory: false,
+    },
+    trigger: {
+      auto: false,
+      manual: true,
+      keywords: ['请求', '接口', 'API', 'fetch', 'curl', 'http', 'url'],
+    },
+    systemPrompt:
+      'httpRequest({url, method?, headers?, body?, timeoutMs?}) 发 HTTP 请求。'
+      + '回参含 status / statusText / headers / body / durationMs。'
+      + '主要用途：测自己的 dev API、查公共 REST、抓静态 HTML 看首屏内容。'
+      + '动态页面（SPA、需登录、需 JS 渲染）拿不到完整 DOM。'
+      + '能用 httpRequest 解决的就别 runCommand 跑 curl，回参更结构化。',
+  },
+  {
+    id: 'core.browser',
+    name: '操作浏览器',
+    description: '用真·Chromium 打开页面、点击、填表、截图、读 F12 console。会执行 JS、保留 cookie',
+    icon: 'play',
+    enabled: false,
+    category: 'core',
+    permissions: {
+      canReadFiles: false,
+      canWriteFiles: false,
+      canRunTerminal: false,
+      canSearchCode: false,
+      canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: true,
+      canAccessMemory: false,
+    },
+    trigger: {
+      auto: false,
+      manual: true,
+      keywords: ['浏览器', '点击', '截图', '页面', 'console', 'f12', '登录', '前端报错'],
+    },
+    systemPrompt:
+      'browserNavigate({url}) 打开，browserClick / browserType 操作，'
+      + 'browserGetContent({selector?}) 读渲染后的文字，browserGetConsole() 读 F12 全部消息，'
+      + 'browserScreenshot({fullPage?, selector?}) 存图到 .gittttt/screenshots/。'
+      + '会话连续：cookie / localStorage 在调用之间保留。'
+      + '截图你看不见但有 DOM 大纲；用户在 UI 里能亲眼看到。'
+      + '比 httpRequest 慢得多——能 httpRequest 解决就别开浏览器。',
   },
   {
     id: 'core.git',
@@ -123,9 +191,11 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: false,
       canWriteFiles: false,
       canRunTerminal: false,
-      canAccessLogs: false,
       canSearchCode: false,
       canAccessGit: true,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: false, manual: true, keywords: ['提交', '分支', 'commit', '合并', 'diff'] },
     systemPrompt:
@@ -143,16 +213,75 @@ const BUILTIN_SKILLS: Skill[] = [
       canReadFiles: false,
       canWriteFiles: false,
       canRunTerminal: false,
-      canAccessLogs: false,
       canSearchCode: true,
       canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: false,
     },
     trigger: { auto: true, manual: true, keywords: ['搜索', '查找', '哪里用到', 'grep'] },
     systemPrompt:
       'searchCode({query, fileTypes?}) 在项目里全文搜索。'
       + '返回 file/line/text。可选 fileTypes 是逗号分隔后缀，如 ".ts,.tsx"。',
   },
+  {
+    id: 'core.memory',
+    name: '项目记忆',
+    description: '让 AI 维护一份每个项目的 Markdown 笔记。每轮对话都会自动塞给 AI，AI 自己写、自己更新。用户可在「记忆」页查看与删除。',
+    icon: 'file',
+    enabled: true,
+    category: 'core',
+    permissions: {
+      canReadFiles: false,
+      canWriteFiles: false,
+      canRunTerminal: false,
+      canSearchCode: false,
+      canAccessGit: false,
+      canMakeHttpRequests: false,
+      canUseBrowser: false,
+      canAccessMemory: true,
+    },
+    trigger: {
+      auto: true,
+      manual: true,
+      keywords: ['记忆', '笔记', '记一下', '记录', '架构', 'memory'],
+    },
+    systemPrompt:
+      'readMemory() 重读、writeMemory({content}) 整体覆盖、appendMemory({content}) 追加一段。'
+      + '第一次接触新项目：先 readFileTree/readFile/searchCode 看一遍，再 writeMemory 写下架构概览、关键文件、约定。'
+      + '后续每轮：发现新知识 appendMemory；旧的错了 writeMemory 重写。'
+      + '上限 64KB，保持精简，**只记跨会话有用的**。',
+  },
 ];
+
+// Canonical permission key set. Adding a new permission? Append it here AND
+// add the field to SkillPermissions in shared/types.ts. The migration step
+// in normalizePermissions() will then auto-default the new key to false on
+// every skill loaded from an older skills.json — old users don't have to
+// manually re-toggle anything.
+const CANONICAL_PERM_KEYS: (keyof Skill['permissions'])[] = [
+  'canReadFiles',
+  'canWriteFiles',
+  'canRunTerminal',
+  'canSearchCode',
+  'canAccessGit',
+  'canMakeHttpRequests',
+  'canUseBrowser',
+  'canAccessMemory',
+];
+
+/** Coerce arbitrary persisted permission objects into the current
+ *  canonical shape: drop unknown / removed keys (e.g. canAccessLogs from
+ *  the deleted log-capture system), default any missing-but-canonical
+ *  key to false. Defensive against both forward and backward drift. */
+function normalizePermissions(raw: unknown): Skill['permissions'] {
+  const out: Record<string, boolean> = {};
+  const src = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
+  for (const k of CANONICAL_PERM_KEYS) {
+    out[k] = src[k] === true;
+  }
+  return out as unknown as Skill['permissions'];
+}
 
 function isSkill(x: unknown): x is Skill {
   if (!x || typeof x !== 'object') return false;
@@ -181,7 +310,14 @@ function loadFromDisk(): Skill[] | null {
     const raw = readFileSync(SKILLS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<SkillsFile>;
     if (!parsed || !Array.isArray(parsed.skills)) return null;
-    return parsed.skills.filter(isSkill);
+    // Run each persisted skill through the permission normaliser so
+    // legacy keys (canAccessLogs) get dropped and newly-introduced
+    // keys default to false. Without this an upgrade leaves old users
+    // unable to ever enable new permissions even if they re-toggle the
+    // skill — the missing field would just be undefined.
+    return parsed.skills
+      .filter(isSkill)
+      .map((s) => ({ ...s, permissions: normalizePermissions(s.permissions) }));
   } catch {
     return null;
   }
@@ -222,7 +358,25 @@ export function readSkills(): Skill[] {
       changed = true;
     }
   }
-  if (changed) {
+  // Always rewrite when the normalised form differs from what's on disk —
+  // that catches BOTH a new builtin being merged in AND the silent
+  // permission-shape migration done in loadFromDisk(). Without this the
+  // app heals in memory but disk stays stale, and the next "did we drop
+  // the dead permission?" check still surfaces the leftover key.
+  let needsRewrite = changed;
+  if (!needsRewrite) {
+    try {
+      const raw = readFileSync(SKILLS_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<SkillsFile>;
+      const fresh = JSON.stringify(merged);
+      const old = JSON.stringify(parsed.skills ?? []);
+      if (fresh !== old) needsRewrite = true;
+    } catch {
+      /* if we can't compare, just rewrite — safer */
+      needsRewrite = true;
+    }
+  }
+  if (needsRewrite) {
     try {
       writeToDisk(merged);
     } catch {

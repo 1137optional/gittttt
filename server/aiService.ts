@@ -25,6 +25,16 @@ import type {
 const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
 const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat';
 
+// Caller-side validation problems should surface as 4xx, not 500. The
+// global error handler in server/index.ts looks for `.status` to decide.
+export class AIInputError extends Error {
+  status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIInputError';
+  }
+}
+
 const SYSTEM_PROMPT =
   '你是 gittttt 调试助手。用户会粘贴运行时日志、堆栈或代码片段。请：\n' +
   '1) 用一两句话定位最可能的根因；\n' +
@@ -42,14 +52,14 @@ interface DeepSeekResponse {
 
 export async function aiChat(req: AIChatRequest): Promise<AIChatResponse> {
   if (!req.apiKey || typeof req.apiKey !== 'string') {
-    throw new Error('Missing apiKey');
+    throw new AIInputError('Missing apiKey');
   }
   if (!Array.isArray(req.messages) || req.messages.length === 0) {
-    throw new Error('messages must be a non-empty array');
+    throw new AIInputError('messages must be a non-empty array');
   }
 
   if (req.provider !== 'deepseek') {
-    throw new Error(`Unsupported provider: ${req.provider}`);
+    throw new AIInputError(`Unsupported provider: ${req.provider}`);
   }
 
   // Prepend our system prompt unless the caller already supplied one. This
