@@ -22,23 +22,25 @@ export const theme = {
     faint: '#B5B7BD',         // disabled / placeholders
   },
   accent: {
-    primary: '#378ADD',       // brand blue
-    primarySoft: '#5AA0E5',
-    primaryDeep: '#1F6FBF',
-    primaryTint: '#E8F1FB',   // subtle brand wash for active branch row
+    primary: '#EC4899',       // pink-500 — brand
+    primarySoft: '#F472B6',   // pink-400
+    primaryDeep: '#BE185D',   // pink-700 — selected/pressed text
+    primaryTint: '#FCE7F3',   // pink-50  — subtle brand wash for active branch row
     success: '#1D9E75',       // teal
     warning: '#BA7517',       // amber
     error: '#D85A30',         // coral / danger
   },
   // Branch palette — assigned by column. Column 0 (usually main/HEAD lane)
-  // gets the brand blue, then coral / amber / teal, then a few neighbors.
+  // is the brand pink, then a deliberately non-blue spread so a single
+  // unified "all blues are pink" theme decision still leaves enough
+  // contrast between adjacent lanes.
   branchPalette: [
-    '#378ADD', // blue   — main / primary lane
+    '#EC4899', // pink   — main / primary lane (brand)
     '#D85A30', // coral  — feature
     '#BA7517', // amber  — release / dashboard
     '#1D9E75', // teal   — hotfix / fix
     '#7A5AF8', // violet
-    '#0EA5E9', // sky
+    '#A855F7', // purple — replaces sky-blue
     '#E11D48', // rose
     '#16A34A', // green
   ],

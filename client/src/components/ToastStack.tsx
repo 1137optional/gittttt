@@ -12,7 +12,8 @@ export function ToastStack(): JSX.Element {
           onClick={() => dismiss(t.id)}
           title="Click to dismiss"
         >
-          {t.message}
+          <span className="toast-msg">{t.message}</span>
+          {t.count > 1 ? <span className="toast-count">×{t.count}</span> : null}
         </div>
       ))}
     </div>

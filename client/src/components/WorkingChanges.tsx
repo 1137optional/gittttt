@@ -49,7 +49,7 @@ export function WorkingChanges(): JSX.Element {
   }
 
   async function discard(file: FileStatus): Promise<void> {
-    const ok = window.confirm(`Discard changes to "${file.path}"? This cannot be undone.`);
+    const ok = window.confirm(`丢弃 "${file.path}" 的改动？此操作不可撤销。`);
     if (!ok) return;
     await discardFiles([file.path]);
   }
@@ -58,21 +58,21 @@ export function WorkingChanges(): JSX.Element {
     <div className="changes-pane">
       <div className="changes-col">
         <div className="changes-head">
-          <span>Unstaged</span>
+          <span>未暂存</span>
           <span className="count">({unstaged.length + conflicted.length})</span>
           <span className="actions">
             <button className="text-btn" onClick={() => void stageAll()}>
-              Stage all
+              全选
             </button>
             <button
               className="text-btn warning"
               onClick={async () => {
-                if (window.confirm('Discard ALL unstaged changes?')) {
+                if (window.confirm('丢弃所有未暂存的改动？')) {
                   await discardFiles(unstaged.map((f) => f.path));
                 }
               }}
             >
-              Discard
+              丢弃
             </button>
           </span>
         </div>
@@ -85,8 +85,8 @@ export function WorkingChanges(): JSX.Element {
                 <button
                   className="row-icon-btn"
                   onClick={() => void stageFiles([f.path])}
-                  title="Mark resolved"
-                  aria-label="Mark resolved"
+                  title="标记已解决"
+                  aria-label="标记已解决"
                 >
                   <Icon name="check" size={14} />
                 </button>
@@ -102,16 +102,16 @@ export function WorkingChanges(): JSX.Element {
                   <button
                     className="row-icon-btn"
                     onClick={() => void stageFiles([f.path])}
-                    title="Stage"
-                    aria-label="Stage"
+                    title="暂存"
+                    aria-label="暂存"
                   >
                     <Icon name="plus" size={14} />
                   </button>
                   <button
                     className="row-icon-btn danger"
                     onClick={() => void discard(f)}
-                    title="Discard"
-                    aria-label="Discard"
+                    title="丢弃"
+                    aria-label="丢弃"
                   >
                     <Icon name="trash" size={14} />
                   </button>
@@ -120,18 +120,18 @@ export function WorkingChanges(): JSX.Element {
             />
           ))}
           {unstaged.length === 0 && conflicted.length === 0 ? (
-            <div className="empty-line">No unstaged changes</div>
+            <div className="empty-line">无变更</div>
           ) : null}
         </div>
       </div>
 
       <div className="changes-col">
         <div className="changes-head">
-          <span>Staged</span>
+          <span>已暂存</span>
           <span className="count">({staged.length})</span>
           <span className="actions">
             <button className="text-btn" onClick={() => void unstageAll()}>
-              Unstage all
+              全部取消
             </button>
           </span>
         </div>
@@ -144,8 +144,8 @@ export function WorkingChanges(): JSX.Element {
                 <button
                   className="row-icon-btn"
                   onClick={() => void unstageFiles([f.path])}
-                  title="Unstage"
-                  aria-label="Unstage"
+                  title="取消暂存"
+                  aria-label="取消暂存"
                 >
                   <Icon name="minus" size={14} />
                 </button>
@@ -153,29 +153,29 @@ export function WorkingChanges(): JSX.Element {
             />
           ))}
           {staged.length === 0 ? (
-            <div className="empty-line">Nothing staged yet</div>
+            <div className="empty-line">无</div>
           ) : null}
         </div>
       </div>
 
       <div className="changes-col">
         <div className="changes-head">
-          <span>Commit</span>
+          <span>提交</span>
           <span className="actions">
             <button
               className="text-btn"
               onClick={() => void stash('save')}
-              title="Stash all uncommitted changes"
+              title="贮藏所有未提交改动"
             >
-              Stash
+              贮藏
             </button>
             <button
               className="text-btn"
               disabled={stashes.length === 0}
               onClick={() => void stash('pop', { index: 0 })}
-              title="Pop latest stash"
+              title="弹出最新贮藏"
             >
-              Pop
+              弹出
             </button>
           </span>
         </div>
@@ -184,7 +184,7 @@ export function WorkingChanges(): JSX.Element {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={onCommitKeyDown}
-            placeholder="Describe your changes…"
+            placeholder="描述你的改动…"
             rows={3}
           />
           <div className="row">
@@ -195,7 +195,7 @@ export function WorkingChanges(): JSX.Element {
                 disabled={staged.length === 0 || message.trim() === ''}
                 onClick={() => void doCommit()}
               >
-                Commit
+                提交
               </button>
             </div>
           </div>

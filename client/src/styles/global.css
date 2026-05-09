@@ -9,87 +9,130 @@
 
 :root,
 :root[data-theme="light"] {
-  --page: #f5f5f7;
+  --page: #f4f5f7;
   --bg: #ffffff;
-  --soft-gray: #f5f5f5;
-  --border: #ecedf0;
-  --border-strong: #d9dde3;
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 8px rgba(15, 23, 42, 0.02);
+  /* Translucent backgrounds for surfaces that sit over `var(--page)` and use
+     `backdrop-filter` (topnav, modals). On platforms without blur support we
+     fall back to nearly-opaque so legibility is unaffected. */
+  --bg-glass: rgba(255, 255, 255, 0.72);
+  --soft-gray: #f0f1f4;
+  --border: #ececf0;
+  --border-strong: #dadce0;
+  --shadow-card: 0 0.5px 1px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.04);
+  --shadow-popover: 0 8px 32px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-tab-active: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0.5px 0 rgba(15, 23, 42, 0.04);
 
   --fg-primary: #1a1a1a;
-  --fg-body: #333333;
-  --fg-secondary: #666666;
-  --fg-muted: #999999;
-  --fg-faint: #b5b7bd;
+  --fg-body: #2c2c2e;
+  --fg-secondary: #5b5e63;
+  --fg-muted: #8e8e93;
+  --fg-faint: #b3b6bd;
 
-  --brand: #378add;
-  --brand-soft: #5aa0e5;
-  --brand-deep: #1f6fbf;
-  --brand-tint: #e8f1fb;
+  /* Pink brand. Picked off the iOS systemPink family but pulled a touch
+     more magenta so it reads as "pink" rather than "salmon" against
+     neutral grays. `--brand-deep` is the on-press / selected-text shade. */
+  --brand: #ec4899;        /* pink-500 */
+  --brand-soft: #f472b6;   /* pink-400 */
+  --brand-deep: #be185d;   /* pink-700 */
+  --brand-tint: rgba(236, 72, 153, 0.10);
 
-  --success: #1d9e75;
-  --warning: #ba7517;
-  --error: #d85a30;
+  --success: #34c759;       /* iOS system green */
+  --warning: #ff9500;       /* iOS system orange */
+  --error: #ff3b30;         /* iOS system red */
 
-  --branch-blue: #378add;
-  --branch-coral: #d85a30;
-  --branch-amber: #ba7517;
-  --branch-teal: #1d9e75;
+  /* `--branch-blue` is a misnomer kept for back-compat with older theme
+     references — its job is "lane #0 colour", which now matches the
+     pink brand instead of iOS blue. */
+  --branch-blue: #ec4899;
+  --branch-coral: #ff3b30;
+  --branch-amber: #ff9500;
+  --branch-teal: #34c759;
 
-  --selection-bg: rgba(55, 138, 221, 0.22);
-  --selection-fg: #0d4180;
+  --selection-bg: rgba(236, 72, 153, 0.22);
+  --selection-fg: #831843;
   --scrollbar-thumb: rgba(15, 23, 42, 0.08);
   --scrollbar-thumb-hover: rgba(15, 23, 42, 0.16);
   --canvas-card: #ffffff;
   --canvas-zebra: #fafbfc;
-  --canvas-row-selected: rgba(55, 138, 221, 0.08);
+  --canvas-row-selected: rgba(236, 72, 153, 0.07);
 
-  --font-ui: "Inter", "Geist", ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-code: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* Apple-system stack first; falls back to anything reasonable.
+     "system-ui" picks the OS UI font on every platform. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", "Inter", system-ui, ui-sans-serif, "Segoe UI", Roboto, sans-serif;
+  --font-code: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
 
-  --top-h: 70px;
+  /* Border radii — iOS-y scale. Reused everywhere so a single bump retones
+     the whole UI. */
+  --radius-xs: 6px;   /* tiny chips, status badges */
+  --radius-sm: 8px;   /* buttons, tabs, file rows */
+  --radius-md: 12px;  /* tab-strip wrapper, action buttons */
+  --radius-lg: 16px;  /* cards, panels */
+  --radius-xl: 22px;  /* modals, sheets */
+
+  --top-h: 56px;
   --side-w: 240px;
   --pages-w: 320px;
-  --transition: 150ms ease;
+  /* iOS standard easing curve. Shortened from 180→130ms after the
+     interactive feedback felt sluggish — 130ms is still a smooth ramp
+     (>1 frame), short enough to read as "instant" on click. */
+  --transition: 130ms cubic-bezier(0.32, 0.72, 0.0, 1.0);
 
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --page: #0f1115;
-  --bg: #161a22;
-  --soft-gray: #1f2531;
-  --border: #232a36;
-  --border-strong: #36404f;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 1px 12px rgba(0, 0, 0, 0.35);
+  /* iOS dark — true neutral grays from Apple's Human Interface Guidelines.
+     Not blue-tinted; the previous palette had a #...32/...47 cast that read
+     as "cool blue dark" instead of the Apple "soft black" feel. Levels:
+       systemBackground       → #000000 (page canvas)
+       secondarySystemBackground → #1c1c1e (cards / chrome)
+       tertiarySystemBackground  → #2c2c2e (elevated / hover)
+       quaternarySystemFill      → #3a3a3c (strong border)
+     Text uses Apple's label colors (#fff / #ebebf5 with descending
+     opacities baked in). */
+  --page: #000000;
+  --bg: #1c1c1e;
+  --bg-glass: rgba(28, 28, 30, 0.72);
+  --soft-gray: #2c2c2e;
+  --border: #2c2c2e;
+  --border-strong: #3a3a3c;
+  --shadow-card: 0 0.5px 1px rgba(0, 0, 0, 0.55), 0 6px 20px rgba(0, 0, 0, 0.35);
+  --shadow-popover: 0 14px 44px rgba(0, 0, 0, 0.60), 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-tab-active: 0 1px 3px rgba(0, 0, 0, 0.55);
 
-  --fg-primary: #e8eaf0;
-  --fg-body: #c8ccd6;
-  --fg-secondary: #9ba3b3;
-  --fg-muted: #6b7384;
-  --fg-faint: #4a5365;
+  --fg-primary: #ffffff;        /* iOS labelColor */
+  --fg-body: #ebebf5;            /* near-white body text */
+  --fg-secondary: #a8a8ad;       /* secondaryLabelColor — 60% white */
+  --fg-muted: #6e6e73;           /* tertiaryLabelColor — 40% white */
+  --fg-faint: #48484a;           /* quaternaryLabel — 20% white */
 
-  --brand: #58a6ff;
-  --brand-soft: #79b8ff;
-  --brand-deep: #79b8ff;
-  --brand-tint: rgba(88, 166, 255, 0.15);
+  /* Pink — dark-mode variant. Lifted up the value so the chip pills,
+     active tab underline and CTA hover state stay legible against the
+     #1c1c1e cards. `--brand-deep` is the "selected text" / pressed state
+     and is *lighter* than `--brand` because in dark mode "deeper" means
+     "more luminous" (mirrors how iOS handles tinted text). */
+  --brand: #f472b6;              /* pink-400 */
+  --brand-soft: #f9a8d4;         /* pink-300 */
+  --brand-deep: #fbcfe8;         /* pink-200 — used for pressed text */
+  --brand-tint: rgba(244, 114, 182, 0.18);
 
-  --success: #3fb787;
-  --warning: #d4a05a;
-  --error: #ef6f4d;
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --error: #ff453a;
 
-  --branch-blue: #58a6ff;
-  --branch-coral: #ef6f4d;
-  --branch-amber: #d4a05a;
-  --branch-teal: #3fb787;
+  --branch-blue: #f472b6;        /* lane #0 — back-compat name */
+  --branch-coral: #ff453a;
+  --branch-amber: #ff9f0a;
+  --branch-teal: #30d158;
 
-  --selection-bg: rgba(88, 166, 255, 0.25);
-  --selection-fg: #cce0ff;
-  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
-  --canvas-card: #161a22;
-  --canvas-zebra: #1a1f29;
-  --canvas-row-selected: rgba(88, 166, 255, 0.12);
+  --selection-bg: rgba(244, 114, 182, 0.32);
+  --selection-fg: #fce7f3;
+  --scrollbar-thumb: rgba(235, 235, 245, 0.12);
+  --scrollbar-thumb-hover: rgba(235, 235, 245, 0.24);
+  --canvas-card: #1c1c1e;
+  --canvas-zebra: #1f1f21;
+  --canvas-row-selected: rgba(244, 114, 182, 0.16);
 
   color-scheme: dark;
 }
@@ -127,8 +170,8 @@ textarea {
   color: var(--fg-body);
   background: var(--bg);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
   outline: none;
   transition: border-color var(--transition), box-shadow var(--transition);
 }
@@ -139,7 +182,7 @@ textarea::placeholder {
 input:focus,
 textarea:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(55, 138, 221, 0.15);
+  box-shadow: 0 0 0 3px var(--brand-tint);
 }
 
 ::selection {
@@ -227,61 +270,133 @@ code,
    Top nav
    ============================================================================= */
 
+/* Topnav — translucent, blurred, with a browser-style tab strip in the
+   middle. Translucency is "best-effort": browsers without `backdrop-filter`
+   simply see a solid `--bg`. */
 .topnav {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 22px;
+  gap: 12px;
+  padding: 0 14px 0 18px;
   height: 100%;
-  background: var(--bg);
+  background: var(--bg-glass);
+  /* Blur radius dropped 20→14px — it's roughly the smallest value that still
+     reads as proper macOS / iOS glass, and a noticeably cheaper composite
+     pass per scroll/animation tick. */
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  backdrop-filter: saturate(180%) blur(14px);
   border-bottom: 1px solid var(--border);
 }
-/* Topnav brand: text block + chevron, doubles as the click target for the
-   repo switcher overlay. The chevron is the affordance that says "this is a
-   menu trigger, not a static label". */
+/* Static brand label — no longer a click target (the duplicate "click brand
+   to switch repos" entry was removed; tabs + the trailing `+` button are
+   the canonical affordance). */
 .topnav-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px 10px 4px 8px;
-  border-radius: 6px;
-  text-align: left;
-  line-height: 1.15;
-  transition: background var(--transition);
-}
-.topnav-brand:hover {
-  background: var(--soft-gray);
-}
-.topnav-brand-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.15;
+  padding: 0 4px 0 2px;
+  flex-shrink: 0;
 }
 .topnav-brand .title {
   font-size: 15px;
   font-weight: 600;
   color: var(--fg-primary);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
-.topnav-brand .subtitle {
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  font-family: var(--font-code);
-  margin-top: 2px;
+
+/* Tab strip — iPad Safari-ish: small pills, active one filled with a soft
+   surface + tiny lift; trailing `+` opens RepoPicker. The strip flexes to
+   fill all the room between brand and right-side actions and scrolls
+   horizontally if it overflows. */
+.topnav-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--soft-gray);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.topnav-brand-chev {
-  color: var(--fg-muted);
-  flex-shrink: 0;
-  transition: color var(--transition), transform var(--transition);
+.topnav-tabs::-webkit-scrollbar {
+  display: none;
 }
-.topnav-brand:hover .topnav-brand-chev {
+.topnav-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+  height: 28px;
+  max-width: 220px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  font-size: 12.5px;
   color: var(--fg-secondary);
-  transform: translateY(1px);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition), color var(--transition), box-shadow var(--transition);
 }
+.topnav-tab:hover {
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--fg-primary);
+}
+.topnav-tab.active {
+  background: var(--bg);
+  color: var(--fg-primary);
+  font-weight: 500;
+  box-shadow: var(--shadow-tab-active);
+}
+.topnav-tab-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.topnav-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+}
+.topnav-tab:hover .topnav-tab-close,
+.topnav-tab.active .topnav-tab-close {
+  opacity: 1;
+}
+.topnav-tab-close:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--fg-primary);
+}
+.topnav-tab-add {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.topnav-tab-add:hover {
+  background: rgba(127, 127, 127, 0.10);
+  color: var(--fg-primary);
+}
+
 .topnav-spacer {
   flex: 1 1 auto;
 }
@@ -290,7 +405,7 @@ code,
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg);
   color: var(--fg-secondary);
@@ -307,6 +422,11 @@ code,
   height: 32px;
   padding: 0;
   justify-content: center;
+  border-color: transparent;
+  background: transparent;
+}
+.topnav-action.icon-only:hover {
+  background: var(--soft-gray);
 }
 .topnav-action[disabled] {
   opacity: 0.5;
@@ -625,7 +745,7 @@ code,
 .graph-pane {
   background: var(--bg);
   margin: 16px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border);
   display: flex;
@@ -970,20 +1090,29 @@ code,
   background: var(--bg);
   border: 1px solid var(--border-strong);
   color: var(--fg-body);
-  border-radius: 6px;
-  padding: 7px 13px;
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
   cursor: pointer;
   font-size: 12.5px;
   font-weight: 500;
-  transition: background var(--transition), border-color var(--transition), color var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition), transform 80ms ease;
 }
 .btn:hover {
   background: var(--soft-gray);
-  border-color: var(--border-strong);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn[disabled] {
   cursor: not-allowed;
   opacity: 0.55;
+}
+.btn[disabled]:active {
+  transform: none;
 }
 .btn.primary {
   background: var(--brand);
@@ -992,10 +1121,11 @@ code,
 }
 .btn.primary:hover {
   background: var(--brand-deep);
+  border-color: var(--brand-deep);
 }
 .btn.danger {
   color: var(--error);
-  border-color: rgba(216, 90, 48, 0.45);
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
 }
 
 /* =============================================================================
@@ -1022,10 +1152,10 @@ code,
   position: fixed;
   inset: 0;
   z-index: 400;
-  background: var(--page);
-  /* Subtle separation from the underlying app while still feeling like a
-     full takeover (vs a tiny modal, which doesn't fit a picker this dense). */
-  box-shadow: 0 -2px 0 var(--border) inset;
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  animation: fadeIn 140ms ease both;
 }
 .picker-overlay-bar {
   width: 720px;
@@ -1053,7 +1183,7 @@ code,
 .picker-card {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
@@ -1186,13 +1316,163 @@ code,
   border: 1px solid var(--border);
 }
 
-.picker-custom-row {
-  display: flex;
-  gap: 8px;
+/* =============================================================================
+   Folder browser modal
+   Used by the in-app folder picker (replaces the old "paste a path" textbox).
+   ============================================================================= */
+
+.modal.folder-browser {
+  width: 640px;
+  max-height: min(680px, 88vh);
+  padding: 16px 18px;
+  gap: 10px;
 }
-.picker-custom-row input {
+
+.folder-browser-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.folder-breadcrumbs {
   flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
   font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--fg-muted);
+  padding: 0 6px;
+  min-width: 0;
+}
+.folder-breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.folder-breadcrumb {
+  background: transparent;
+  border: none;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+}
+.folder-breadcrumb:hover {
+  background: var(--soft-gray);
+  color: var(--fg-primary);
+}
+.folder-breadcrumb.current {
+  color: var(--fg-primary);
+  font-weight: 500;
+  cursor: default;
+}
+.folder-breadcrumb-sep {
+  color: var(--fg-faint);
+  margin: 0 1px;
+}
+.folder-breadcrumb-current {
+  color: var(--fg-primary);
+  padding: 3px 6px;
+}
+.folder-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.folder-hidden-toggle input {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.folder-browser-body {
+  flex: 1 1 auto;
+  min-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+  outline: none;
+}
+.folder-row:hover,
+.folder-row:focus {
+  background: var(--soft-gray);
+}
+.folder-row.is-git {
+  /* Subtle tint so the eye locks onto repo rows during scrolling. */
+  background: color-mix(in srgb, var(--brand) 4%, transparent);
+}
+.folder-row.is-git:hover,
+.folder-row.is-git:focus {
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+}
+.folder-row.is-hidden-name .folder-row-name {
+  color: var(--fg-muted);
+}
+.folder-icon {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+.folder-icon.git {
+  color: var(--brand);
+}
+.folder-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-row-spacer {
+  flex: 1 1 auto;
+}
+.folder-row-chev {
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.folder-row-open {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 11.5px;
+}
+
+.folder-browser-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.folder-browser-foot-hint {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  color: var(--fg-muted);
 }
 
 .picker-error {
@@ -1308,6 +1588,9 @@ code,
 }
 .toast {
   pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: var(--bg);
   color: var(--fg-primary);
   border: 1px solid var(--border-strong);
@@ -1317,6 +1600,22 @@ code,
   max-width: 380px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   animation: toastIn 200ms ease both;
+}
+.toast-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-count {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--soft-gray);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .toast.success {
   border-left: 3px solid var(--success);
@@ -1333,6 +1632,16 @@ code,
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Generic "this thing is busy / loading" spin. Applied to inline SVG icons
+   (theirs `currentColor` keeps the colour theming intact). */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+  transform-origin: 50% 50%;
 }
 
 /* =============================================================================
@@ -1376,25 +1685,26 @@ code,
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(15, 23, 42, 0.32);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9000;
-  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
   animation: fadeIn 140ms ease both;
 }
 .modal {
   background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  padding: 22px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 24px 26px;
   min-width: 420px;
-  max-width: 90vw;
+  max-width: 92vw;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+  box-shadow: var(--shadow-popover);
 }
 .modal h3 {
   margin: 0;

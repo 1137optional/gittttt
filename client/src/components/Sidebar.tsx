@@ -56,14 +56,12 @@ export function Sidebar(): JSX.Element {
   function preflight(): boolean {
     if (!status) return true;
     if (status.inMerge || status.inRebase) {
-      pushToast('warn', 'Finish or abort the in-progress merge/rebase first.');
+      pushToast('warn', '请先完成或中止正在进行的合并 / 变基');
       return false;
     }
     const dirty = status.unstaged.length + status.staged.length;
     if (dirty > 0) {
-      return window.confirm(
-        `You have ${dirty} uncommitted change${dirty === 1 ? '' : 's'}. Continue switching branch?`,
-      );
+      return window.confirm(`有 ${dirty} 个未提交改动，确定切换分支？`);
     }
     return true;
   }
@@ -80,22 +78,22 @@ export function Sidebar(): JSX.Element {
     e.stopPropagation();
     const items: MenuItem[] = b.isRemote
       ? [
-          { label: 'Checkout (track)', onClick: () => void onCheckout(b) },
+          { label: '检出（跟踪）', onClick: () => void onCheckout(b) },
           { separator: true },
-          { label: `Merge into ${currentName}`, onClick: () => void merge(b.name) },
-          { label: `Rebase ${currentName} onto`, onClick: () => void rebase(b.name) },
+          { label: `合并到 ${currentName}`, onClick: () => void merge(b.name) },
+          { label: `变基 ${currentName} 到此`, onClick: () => void rebase(b.name) },
         ]
       : [
-          { label: b.name === currentName ? 'Already current' : 'Checkout', onClick: () => void onCheckout(b) },
+          { label: b.name === currentName ? '当前分支' : '检出', onClick: () => void onCheckout(b) },
           { separator: true },
-          { label: `Merge into ${currentName}`, onClick: () => void merge(b.name) },
-          { label: `Rebase ${currentName} onto`, onClick: () => void rebase(b.name) },
+          { label: `合并到 ${currentName}`, onClick: () => void merge(b.name) },
+          { label: `变基 ${currentName} 到此`, onClick: () => void rebase(b.name) },
           { separator: true },
           {
-            label: 'Delete branch',
+            label: '删除分支',
             danger: true,
             onClick: () => {
-              if (window.confirm(`Delete branch "${b.name}"?`)) {
+              if (window.confirm(`删除分支 "${b.name}"？`)) {
                 void deleteBranch(b.name);
               }
             },
@@ -112,14 +110,14 @@ export function Sidebar(): JSX.Element {
           className={`left-nav-tab ${leftPage === 'branches' ? 'active' : ''}`}
           onClick={() => setLeftPage('branches')}
         >
-          Branches
+          分支
         </button>
         <button
           type="button"
           className={`left-nav-tab ${leftPage === 'docs' ? 'active' : ''}`}
           onClick={() => setLeftPage('docs')}
         >
-          Docs
+          文档
         </button>
       </div>
 
@@ -130,7 +128,7 @@ export function Sidebar(): JSX.Element {
           <>
       {/* ---- Branches ---- */}
       <div className="sidebar-section">
-        <div className="section-label">Branches</div>
+        <div className="section-label">本地分支</div>
         <div className="branch-list">
           {local.map((b) => (
             <div
@@ -147,9 +145,9 @@ export function Sidebar(): JSX.Element {
                 <span className="branch-name">{b.name}</span>
                 {b.name === currentName && (b.ahead > 0 || b.behind > 0) ? (
                   <span className="branch-status">
-                    {b.ahead > 0 ? `${b.ahead} commit${b.ahead === 1 ? '' : 's'} ahead` : ''}
-                    {b.ahead > 0 && b.behind > 0 ? ' · ' : ''}
-                    {b.behind > 0 ? `${b.behind} behind` : ''}
+                    {b.ahead > 0 ? `↑${b.ahead}` : ''}
+                    {b.ahead > 0 && b.behind > 0 ? ' ' : ''}
+                    {b.behind > 0 ? `↓${b.behind}` : ''}
                   </span>
                 ) : null}
               </div>
@@ -159,7 +157,7 @@ export function Sidebar(): JSX.Element {
                   e.stopPropagation();
                   showBranchMenu(e, b);
                 }}
-                title="More actions"
+                title="更多操作"
               >
                 <Icon name="more" size={14} />
               </span>
@@ -171,7 +169,7 @@ export function Sidebar(): JSX.Element {
       {/* ---- Remotes (compact) ---- */}
       {remote.length > 0 ? (
         <div className="sidebar-section">
-          <div className="section-label">Remote</div>
+          <div className="section-label">远程</div>
           <div className="branch-list">
             {remote.slice(0, 8).map((b) => (
               <div
@@ -198,7 +196,7 @@ export function Sidebar(): JSX.Element {
       {/* ---- Stash (only when present) ---- */}
       {stashes.length > 0 ? (
         <div className="sidebar-section">
-          <div className="section-label">Stash</div>
+          <div className="section-label">贮藏</div>
           <div className="branch-list">
             {stashes.map((s) => (
               <div
@@ -211,14 +209,14 @@ export function Sidebar(): JSX.Element {
                     x: e.clientX,
                     y: e.clientY,
                     items: [
-                      { label: 'Apply', onClick: () => void stash('apply', { index: s.index }) },
-                      { label: 'Pop (apply + drop)', onClick: () => void stash('pop', { index: s.index }) },
+                      { label: '应用', onClick: () => void stash('apply', { index: s.index }) },
+                      { label: '弹出（应用并删除）', onClick: () => void stash('pop', { index: s.index }) },
                       { separator: true },
                       {
-                        label: 'Drop',
+                        label: '删除',
                         danger: true,
                         onClick: () => {
-                          if (window.confirm(`Drop stash@{${s.index}}?`)) {
+                          if (window.confirm(`删除 stash@{${s.index}}？`)) {
                             void stash('drop', { index: s.index });
                           }
                         },

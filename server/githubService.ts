@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { deleteToken, readToken, writeToken } from './tokenStore.js';
+import { readRecentRepos } from './recentRepos.js';
 import type {
   CreateGitHubRepoInput,
   GitHubAuthStatus,
@@ -228,33 +229,43 @@ export class GitHubService {
   }
 
   // ---------------------------------------------------------------------------
-  // Local repo store — every checkout under reposDir, plus the active repo
-  // pinned to the top if it lives outside that dir.
+  // Local repo store — union of three sources:
+  //   1. Auto-clones under reposDir (scanned every call so manual `git clone`
+  //      into the dir is reflected without restart).
+  //   2. Recent-opened paths persisted in ~/.gittttt/recent-repos.json (every
+  //      attachRepo call writes here). This is what makes folder-browser
+  //      picks "stick" — they appear in subsequent picker visits even though
+  //      they live outside reposDir.
+  //   3. The active repo, always pinned at the top.
+  // Each path is validated to still exist + still be a git repo before
+  // surfacing; stale entries are filtered out (and would naturally drop off
+  // the recents store the next time it's rewritten).
+  //
+  // Order: active repo → other recent-opened → reposDir scan (alpha). Recent
+  // ordering matters because it doubles as MRU on the picker.
   // ---------------------------------------------------------------------------
 
   listLocalRepos(currentRepoPath: string | null): LocalRepoSummary[] {
     ensureDir(this.reposDir);
-    const cloned = scanLocalClones(this.reposDir);
     const seen = new Set<string>();
     const out: LocalRepoSummary[] = [];
-    for (const c of cloned) {
-      if (seen.has(c.path)) continue;
-      seen.add(c.path);
+
+    const push = (path: string, isCurrent: boolean): void => {
+      if (seen.has(path)) return;
+      if (!isLocalGitRepo(path)) return;
+      seen.add(path);
       out.push({
-        name: c.name,
-        path: c.path,
+        name: basename(path),
+        path,
         currentBranchName: '',
-        isCurrent: currentRepoPath === c.path,
+        isCurrent,
       });
-    }
-    if (currentRepoPath && !seen.has(currentRepoPath)) {
-      out.unshift({
-        name: basename(currentRepoPath),
-        path: currentRepoPath,
-        currentBranchName: '',
-        isCurrent: true,
-      });
-    }
+    };
+
+    if (currentRepoPath) push(currentRepoPath, true);
+    for (const r of readRecentRepos()) push(r.path, currentRepoPath === r.path);
+    for (const c of scanLocalClones(this.reposDir)) push(c.path, currentRepoPath === c.path);
+
     return out;
   }
 
@@ -349,6 +360,17 @@ function redactToken(msg: string, token: string): string {
 interface LocalClone {
   name: string;
   path: string;
+}
+
+function isLocalGitRepo(path: string): boolean {
+  try {
+    if (!existsSync(path)) return false;
+    if (!statSync(path).isDirectory()) return false;
+    // .git can be a directory (regular clone) or a file (worktree pointer).
+    return existsSync(join(path, '.git'));
+  } catch {
+    return false;
+  }
 }
 
 function scanLocalClones(dir: string): LocalClone[] {

@@ -22,20 +22,37 @@ const DEFAULT_DOCS_MD = `# 右键菜单说明
 
 | 菜单项 | 作用 |
 | --- | --- |
-| Checkout this commit (detached) | 把 \`HEAD\` 移到该 commit。之后处于 detached HEAD 状态，需要再 checkout 一个分支或基于此创建新分支才能继续。 |
-| Create branch from this commit… | 弹窗新建一个以该 commit 为起点的分支。这是新建分支的 **唯一入口**（左侧栏不再有 "+ New branch" 按钮）。 |
-| Cherry-pick onto … | 把该 commit 的 patch 重新应用到 **当前分支**。如果该 commit 已经是 \`HEAD\`，会被禁用。 |
-| Revert this commit | 生成一个新的 commit 用来撤销该 commit 的改动（适合共享分支，不会改写历史）。 |
-| Merge into … | 把该 commit（作为 ref）合并进当前分支。等价于合并指向该 commit 的分支顶端。 |
-| Rebase … onto this commit | 把当前分支的 commits 在该 commit 之上重新应用。该 commit 已是 \`HEAD\` 时无意义。 |
-| Push 当前分支 → 某分支 | 仅当该 commit 上挂着 **本地分支标签** 且不是当前分支时显示。每个符合条件的分支会出现一行，执行 \`git push origin <current>:<target>\`，把当前分支的 tip 推到远程的目标分支 ref。detached HEAD 时整组都不显示。 |
-| Copy hash / Copy short hash | 复制完整 SHA 或 7 位短 SHA 到剪贴板。 |
+| 检出此 commit（分离） | 把 \`HEAD\` 移到该 commit。之后处于 detached HEAD 状态，需要再检出一个分支或基于此新建分支才能继续。 |
+| 从此 commit 新建分支… | 弹窗新建一个以该 commit 为起点的分支。这是新建分支的 **唯一入口**（左侧栏不再有"新建分支"按钮）。 |
+| Cherry-pick 到 … | 把该 commit 的 patch 重新应用到 **当前分支**。如果该 commit 已经是 \`HEAD\`，会被禁用。 |
+| 撤销此 commit（revert） | 生成一个新的 commit 用来撤销该 commit 的改动（适合共享分支，不会改写历史）。 |
+| 合并到 … | 把该 commit（作为 ref）合并进当前分支。等价于合并指向该 commit 的分支顶端。 |
+| 变基 … 到此 commit | 把当前分支的 commits 在该 commit 之上重新应用。该 commit 已是 \`HEAD\` 时无意义。 |
+| 推送 当前分支 → 某分支 | 仅当该 commit 上挂着 **本地分支标签** 且不是当前分支时显示。执行 \`git push origin <current>:<target>\`，把当前分支的 tip 推到远程的目标分支 ref。detached HEAD 时整组都不显示。 |
+| 复制 hash / 复制短 hash | 复制完整 SHA 或 7 位短 SHA 到剪贴板。 |
 
-## 小提示
+# 文件状态字母
 
-- 这份文档是 **可编辑** 的，点右上角 \`Edit\` 即可。改完按 \`Save\` 存到浏览器；\`Reset\` 会恢复成内置版本。
+右侧"工作区"面板里每个文件名前的方块字母代表它在 Git 里的状态，跟 \`git status --short\` 完全一致。
+认这套字母就够了——任何 Git 工具（命令行、GitKraken、GitHub Desktop）都用同一组。
+
+| 字母 | 含义 | 一般出现在 |
+| --- | --- | --- |
+| **M** | Modified — 改动了已追踪的文件 | 未暂存 / 已暂存 |
+| **A** | Added — 新文件已 \`git add\` 进暂存 | 已暂存 |
+| **D** | Deleted — 删除了已追踪的文件 | 未暂存 / 已暂存 |
+| **R** | Renamed — 重命名 | 已暂存 |
+| **C** | Copied — 复制 | 已暂存 |
+| **?** | Untracked — Git 还没追踪的新文件 | 未暂存 |
+| **!** | Conflicted — 合并冲突，需要手动解决 | 未暂存 |
+
+冲突文件解决完后，点行尾的 ✓ 把它标记成"已解决"（其实就是 \`git add\` 那个文件），冲突状态就消失。
+
+# 编辑提示
+
+- 这份文档 **可编辑**，点右上角"编辑"即可。改完按"保存"存到浏览器；"恢复默认"会回到内置版本。
 - 内容用 **Markdown** 写：标题、段落、列表、表格、\`行内代码\`、\`\`\`代码块\`\`\`、**加粗** 都能用。
-- 当前主题（浅 / 深）通过右上角 \`☀ / ☾\` 切换，会记住你的选择。
+- 当前主题（浅 / 深）通过顶栏右上角的图标切换，会记住你的选择。
 `;
 
 export function LeftDocs(): JSX.Element {

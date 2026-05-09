@@ -10,11 +10,54 @@ import type {
 import { api } from './api';
 
 const PAGE_SIZE = 300;
+const TABS_STORAGE_KEY = 'gittttt:tabs';
 
 interface Toast {
   id: number;
   kind: 'info' | 'success' | 'warn' | 'error';
   message: string;
+  count: number;
+}
+
+export interface RepoTab {
+  path: string;
+  name: string;
+}
+
+// Tabs are persisted as a tiny `Array<{path,name}>` blob so the strip
+// survives a page reload. We never store anything sensitive — paths only.
+function readPersistedTabs(): RepoTab[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(TABS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (t): t is RepoTab =>
+          !!t &&
+          typeof (t as RepoTab).path === 'string' &&
+          typeof (t as RepoTab).name === 'string',
+      )
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function persistTabs(tabs: RepoTab[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(tabs));
+  } catch {
+    /* swallow — storage being full shouldn't break the app */
+  }
+}
+
+function repoBasename(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || path;
 }
 
 interface AppState {
@@ -41,6 +84,12 @@ interface AppState {
    *  a repo is already attached (so the user can switch / clone / create). */
   showRepoPicker: boolean;
   setShowRepoPicker(v: boolean): void;
+  /** Browser-style tab strip in the topnav: every repo the user has opened
+   *  during this session (or in a previous session, restored from
+   *  localStorage). Order is creation order; the active tab is whichever
+   *  matches the currently attached repo path. */
+  openTabs: RepoTab[];
+  closeTab(path: string): Promise<void>;
   /** Active visual theme. The flag is mirrored to <html data-theme=…> and
    *  persisted in localStorage; default follows the OS preference. */
   theme: 'light' | 'dark';
@@ -88,6 +137,9 @@ interface AppState {
 }
 
 let nextToastId = 1;
+// Tracks pending dismissal timers so duplicate-toast pushes can reset the
+// TTL (and dismissals can clear the timer to avoid late-firing dismisses).
+const toastTimers = new Map<number, number>();
 
 const THEME_KEY = 'gittttt:theme';
 
@@ -133,7 +185,40 @@ export const useApp = create<AppState>((set, get) => {
     }
   };
 
+  // SSE-driven refreshes can fire in bursts (e.g. an editor saves several
+  // files in <300ms — the server debounces, but rapid sequential bursts
+  // still arrive). We coalesce overlapping reloads here: if a refresh is
+  // already in flight, callers receive the SAME promise instead of
+  // queueing a fresh round of 6 git calls. A pending "another refresh
+  // requested while the current one was running" turns into exactly one
+  // follow-up reload after the current one settles.
+  let inflightReload: Promise<void> | null = null;
+  let pendingReload = false;
+  const dedupedReload = async (): Promise<void> => {
+    if (inflightReload) {
+      pendingReload = true;
+      return inflightReload;
+    }
+    inflightReload = (async () => {
+      try {
+        await reloadCore();
+      } finally {
+        const wasPending = pendingReload;
+        pendingReload = false;
+        inflightReload = null;
+        if (wasPending) {
+          // One trailing reload to capture any state that mutated after
+          // we snapshotted but before we finished — without unbounded
+          // recursion, since the inner call resets `inflightReload` first.
+          await dedupedReload();
+        }
+      }
+    })();
+    return inflightReload;
+  };
+
   const reloadCore = async (): Promise<void> => {
+    const previousPath = get().repo?.path ?? null;
     const repo = await api.getRepo();
     if (!repo.open) {
       set({ repoOpen: false, repo: null });
@@ -147,15 +232,26 @@ export const useApp = create<AppState>((set, get) => {
       api.getCommitCount(),
       api.getCommitsRange(0, PAGE_SIZE),
     ]);
+    // Make sure the active repo always has a tab — if the server attached a
+    // repo we don't yet know about (cold start, switched via picker, etc.),
+    // append it. We never demote the active tab; closing it is an explicit
+    // user action handled in `closeTab`.
+    const path = repo.path!;
+    let tabs = get().openTabs;
+    if (!tabs.some((t) => t.path === path)) {
+      tabs = [...tabs, { path, name: repoBasename(path) }];
+      persistTabs(tabs);
+    }
     set({
       repoOpen: true,
       repo: {
-        path: repo.path!,
+        path,
         currentBranchName: repo.currentBranchName!,
         detachedHead: !!repo.detachedHead,
         inMerge: !!repo.inMerge,
         inRebase: !!repo.inRebase,
       },
+      openTabs: tabs,
       branches,
       tags,
       stashes,
@@ -167,6 +263,12 @@ export const useApp = create<AppState>((set, get) => {
     const selected = get().selectedCommitHash;
     if (selected && !commits.some((c) => c.hash === selected)) {
       set({ selectedCommitHash: null });
+    }
+    // Active repo just changed (clone, create, switch tab, folder pick, …).
+    // Dismiss the picker overlay if it's open so the user always lands back
+    // in the main view rather than staying on the "destination" page.
+    if (previousPath !== path && get().showRepoPicker) {
+      set({ showRepoPicker: false });
     }
   };
 
@@ -187,6 +289,29 @@ export const useApp = create<AppState>((set, get) => {
     showRepoPicker: false,
     setShowRepoPicker(v) {
       set({ showRepoPicker: v });
+    },
+    openTabs: readPersistedTabs(),
+    async closeTab(path) {
+      const { openTabs, repo } = get();
+      const idx = openTabs.findIndex((t) => t.path === path);
+      if (idx < 0) return;
+      const next = openTabs.filter((t) => t.path !== path);
+      // Closing the only tab: keep it (the user really shouldn't end up with
+      // zero tabs and a "ghost" attached repo). UI hides × in that case too;
+      // this is a belt-and-braces guard.
+      if (next.length === 0) return;
+      set({ openTabs: next });
+      persistTabs(next);
+      // Closing the active tab → switch to the neighbour to its left, or to
+      // index 0 if we removed the leftmost tab.
+      const isActive = repo?.path === path;
+      if (isActive) {
+        const focus = next[Math.max(0, idx - 1)];
+        await wrap(async () => {
+          await api.openRepo(focus.path);
+          await reloadCore();
+        });
+      }
     },
     theme: (() => {
       const t = readInitialTheme();
@@ -209,11 +334,11 @@ export const useApp = create<AppState>((set, get) => {
     toasts: [],
 
     async init() {
-      await wrap(reloadCore);
+      await wrap(dedupedReload);
     },
 
     async refreshAll() {
-      await wrap(reloadCore);
+      await wrap(dedupedReload);
     },
 
     async openRepo(path) {
@@ -224,7 +349,7 @@ export const useApp = create<AppState>((set, get) => {
         // "destination", once you've reached it the user expects to land
         // back in the main view.
         set({ showRepoPicker: false });
-        get().pushToast('success', `Opened repository at ${path}`);
+        get().pushToast('success', `已打开 ${path}`);
       });
     },
 
@@ -262,7 +387,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       set({ isLoading: false });
-      if (ok) get().pushToast('success', 'Pulled successfully');
+      if (ok) get().pushToast('success', '已 pull');
       await get().refreshAll();
     },
 
@@ -274,14 +399,14 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       set({ isLoading: false });
-      if (ok) get().pushToast('success', 'Pushed successfully');
+      if (ok) get().pushToast('success', '已 push');
       await get().refreshAll();
     },
 
     async pushTo(remoteRef) {
       const local = get().repo?.currentBranchName;
       if (!local) {
-        get().pushToast('warn', 'Detached HEAD — check out a branch before pushing.');
+        get().pushToast('warn', 'HEAD 已分离 — 请先检出分支');
         return;
       }
       set({ isLoading: true });
@@ -290,7 +415,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       set({ isLoading: false });
-      if (ok) get().pushToast('success', `Pushed ${local} → ${remoteRef}`);
+      if (ok) get().pushToast('success', `已推送 ${local} → ${remoteRef}`);
       await get().refreshAll();
     },
 
@@ -304,7 +429,7 @@ export const useApp = create<AppState>((set, get) => {
       if (pulled) {
         await wrap(async () => {
           await api.push(branch);
-          get().pushToast('success', 'Synced successfully');
+          get().pushToast('success', '已同步');
         });
       }
       set({ isLoading: false });
@@ -317,7 +442,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       if (ok) {
-        get().pushToast('success', `Checked out ${branch}`);
+        get().pushToast('success', `已检出 ${branch}`);
         await get().refreshAll();
       }
     },
@@ -326,11 +451,11 @@ export const useApp = create<AppState>((set, get) => {
       const result = await wrap(async () => {
         const r = await api.merge(target);
         const label = friendlyRef(target);
-        if (r.ok) get().pushToast('success', `Merged ${label}`);
+        if (r.ok) get().pushToast('success', `已合并 ${label}`);
         else
           get().pushToast(
             'warn',
-            `Merge conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+            `合并冲突，涉及 ${r.conflicts?.length ?? 0} 个文件`,
           );
         return r;
       });
@@ -342,11 +467,11 @@ export const useApp = create<AppState>((set, get) => {
       const result = await wrap(async () => {
         const r = await api.rebase(target);
         const label = friendlyRef(target);
-        if (r.ok) get().pushToast('success', `Rebased onto ${label}`);
+        if (r.ok) get().pushToast('success', `已变基到 ${label}`);
         else
           get().pushToast(
             'warn',
-            `Rebase conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+            `变基冲突，涉及 ${r.conflicts?.length ?? 0} 个文件`,
           );
         return r;
       });
@@ -358,11 +483,11 @@ export const useApp = create<AppState>((set, get) => {
       const result = await wrap(async () => {
         const r = await api.cherryPick(hash);
         const label = friendlyRef(hash);
-        if (r.ok) get().pushToast('success', `Cherry-picked ${label}`);
+        if (r.ok) get().pushToast('success', `已 cherry-pick ${label}`);
         else
           get().pushToast(
             'warn',
-            `Cherry-pick conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+            `Cherry-pick 冲突，涉及 ${r.conflicts?.length ?? 0} 个文件`,
           );
         return r;
       });
@@ -374,11 +499,11 @@ export const useApp = create<AppState>((set, get) => {
       const result = await wrap(async () => {
         const r = await api.revert(hash);
         const label = friendlyRef(hash);
-        if (r.ok) get().pushToast('success', `Reverted ${label}`);
+        if (r.ok) get().pushToast('success', `已撤销 ${label}`);
         else
           get().pushToast(
             'warn',
-            `Revert conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+            `撤销冲突，涉及 ${r.conflicts?.length ?? 0} 个文件`,
           );
         return r;
       });
@@ -392,7 +517,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       if (ok) {
-        get().pushToast('success', `Deleted branch ${name}`);
+        get().pushToast('success', `已删除 ${name}`);
         await get().refreshAll();
       }
     },
@@ -403,7 +528,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       if (ok) {
-        get().pushToast('success', `Created branch ${name}`);
+        get().pushToast('success', `已创建 ${name}`);
         await get().refreshAll();
       }
     },
@@ -435,7 +560,7 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       if (ok) {
-        get().pushToast('success', 'Commit created');
+        get().pushToast('success', '已提交');
         await get().refreshAll();
       }
     },
@@ -446,18 +571,52 @@ export const useApp = create<AppState>((set, get) => {
         return true;
       });
       if (ok) {
-        get().pushToast('success', `Stash ${action} ok`);
+        const map: Record<typeof action, string> = {
+          save: '已贮藏',
+          apply: '已应用',
+          pop: '已弹出',
+          drop: '已删除',
+        };
+        get().pushToast('success', map[action] ?? '完成');
         await get().refreshAll();
       }
     },
 
     pushToast(kind, message) {
-      const id = nextToastId++;
-      set({ toasts: [...get().toasts, { id, kind, message }] });
       const ttl = kind === 'error' ? 6000 : 3000;
-      setTimeout(() => get().dismissToast(id), ttl);
+      // De-dupe: if an active toast with the same kind+message is still on
+      // screen, bump its count and reset its TTL instead of stacking a
+      // brand-new toast. This is what stops a chronically-failing reload
+      // (unborn HEAD, network down, …) from snowballing into a wall of
+      // identical errors.
+      const existing = get().toasts.find((t) => t.kind === kind && t.message === message);
+      if (existing) {
+        const prevTimer = toastTimers.get(existing.id);
+        if (prevTimer !== undefined) clearTimeout(prevTimer);
+        set({
+          toasts: get().toasts.map((t) =>
+            t.id === existing.id ? { ...t, count: t.count + 1 } : t,
+          ),
+        });
+        toastTimers.set(
+          existing.id,
+          setTimeout(() => get().dismissToast(existing.id), ttl) as unknown as number,
+        );
+        return;
+      }
+      const id = nextToastId++;
+      set({ toasts: [...get().toasts, { id, kind, message, count: 1 }] });
+      toastTimers.set(
+        id,
+        setTimeout(() => get().dismissToast(id), ttl) as unknown as number,
+      );
     },
     dismissToast(id) {
+      const timer = toastTimers.get(id);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        toastTimers.delete(id);
+      }
       set({ toasts: get().toasts.filter((t) => t.id !== id) });
     },
   };

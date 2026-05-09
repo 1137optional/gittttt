@@ -160,3 +160,32 @@ export interface CreateGitHubRepoInput {
   isPrivate: boolean;
   addReadme?: boolean;
 }
+
+// =============================================================================
+// Filesystem browser (drives /api/fs/browse)
+// Used by the in-app folder picker so users never have to paste a path.
+// =============================================================================
+
+export interface FsEntry {
+  /** Display name (basename). */
+  name: string;
+  /** Absolute path. */
+  path: string;
+  /** True iff `<path>/.git` exists — let UI surface "open" directly. */
+  isGitRepo: boolean;
+  /** True iff name starts with a dot (hidden by default). */
+  hidden: boolean;
+}
+
+export interface FsBrowseResult {
+  /** Absolute path of the directory we just listed. */
+  path: string;
+  /** Absolute path of the parent dir, or null if `path` is the FS root. */
+  parent: string | null;
+  /** True iff `<path>/.git` exists — i.e. the listed directory itself is a
+   *  git repo, in which case the UI offers an "open this folder" footer. */
+  isGitRepo: boolean;
+  /** Direct children of `path`, directories only, sorted: git repos first
+   *  (so the cursor lands on the most relevant rows), then alphabetical. */
+  entries: FsEntry[];
+}

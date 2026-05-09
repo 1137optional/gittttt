@@ -36,6 +36,33 @@ function shortHash(h: string): string {
   return h.slice(0, 7);
 }
 
+// True when a Git error is "this repo has no commits yet" / "HEAD doesn't
+// resolve to a real ref". simple-git surfaces these as thrown errors with
+// stderr in the message; we treat them as a quiet empty result rather than
+// flooding the user with toasts on every reload.
+function isUnbornHead(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const m = e.message;
+  return (
+    m.includes('No such ref') ||
+    m.includes('does not have any commits yet') ||
+    m.includes("ambiguous argument 'HEAD'") ||
+    m.includes('unknown revision or path') ||
+    m.includes('bad default revision')
+  );
+}
+
+// Run `op` and treat unborn-HEAD failures as `fallback`. Anything else
+// re-throws so genuine breakage still surfaces.
+async function safeRead<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await op();
+  } catch (e) {
+    if (isUnbornHead(e)) return fallback;
+    throw e;
+  }
+}
+
 // Parse the colon-separated decoration list from `%D`, e.g.
 // "HEAD -> main, origin/main, tag: v1.0".
 function parseRefs(decoration: string): CommitRef[] {
@@ -138,7 +165,13 @@ export class GitService {
   // ---------------------------------------------------------------------------
 
   async getRepoInfo(): Promise<RepoInfo> {
-    const headRef = (await this.git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim();
+    // `symbolic-ref -q HEAD` is "quiet" but still exits non-zero on unborn
+    // HEAD; simple-git turns that into a thrown error. Treat unborn HEAD
+    // and detached HEAD identically — both produce empty branch name.
+    const headRef = await safeRead(
+      async () => (await this.git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim(),
+      '',
+    );
     const detached = headRef === '';
     const inMerge = existsSync(join(this.repoPath, '.git', 'MERGE_HEAD'));
     const inRebase =
@@ -154,7 +187,10 @@ export class GitService {
   }
 
   async getBranches(): Promise<Branch[]> {
-    const headRef = (await this.git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim();
+    const headRef = await safeRead(
+      async () => (await this.git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim(),
+      '',
+    );
     // Local branches with upstream + ahead/behind
     const localFmt = `%(refname:short)${FS}%(refname)${FS}%(objectname)${FS}%(upstream:short)${FS}%(upstream:track)`;
     const localOut = await this.git.raw([
@@ -247,37 +283,43 @@ export class GitService {
   }
 
   async getCommitCount(): Promise<number> {
-    const out = (await this.git.raw(['rev-list', '--all', '--count'])).trim();
-    return parseInt(out, 10) || 0;
+    return safeRead(async () => {
+      const out = (await this.git.raw(['rev-list', '--all', '--count'])).trim();
+      return parseInt(out, 10) || 0;
+    }, 0);
   }
 
   async getCommitsRange(skip: number, limit: number): Promise<Commit[]> {
-    const args = [
-      'log',
-      '--all',
-      '--topo-order',
-      '--date-order',
-      `--format=${LOG_FORMAT}`,
-      `--skip=${skip}`,
-      `--max-count=${limit}`,
-    ];
-    const out = await this.git.raw(args);
-    return this.parseCommits(out);
+    return safeRead(async () => {
+      const args = [
+        'log',
+        '--all',
+        '--topo-order',
+        '--date-order',
+        `--format=${LOG_FORMAT}`,
+        `--skip=${skip}`,
+        `--max-count=${limit}`,
+      ];
+      const out = await this.git.raw(args);
+      return this.parseCommits(out);
+    }, []);
   }
 
   async searchCommits(query: string): Promise<string[]> {
     const q = query.trim();
     if (!q) return [];
-    const args = [
-      'log',
-      '--all',
-      '-i',
-      `--grep=${q}`,
-      '--format=%H',
-      '--max-count=200',
-    ];
-    const out = await this.git.raw(args);
-    return out.split('\n').filter(Boolean);
+    return safeRead(async () => {
+      const args = [
+        'log',
+        '--all',
+        '-i',
+        `--grep=${q}`,
+        '--format=%H',
+        '--max-count=200',
+      ];
+      const out = await this.git.raw(args);
+      return out.split('\n').filter(Boolean);
+    }, []);
   }
 
   private parseCommits(raw: string): Commit[] {

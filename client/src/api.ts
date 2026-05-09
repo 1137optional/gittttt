@@ -2,6 +2,7 @@ import type {
   Branch,
   Commit,
   CreateGitHubRepoInput,
+  FsBrowseResult,
   GitHubAuthStatus,
   GitHubRepoSummary,
   LocalRepoSummary,
@@ -104,6 +105,15 @@ export const api = {
   githubCreate: (input: CreateGitHubRepoInput): Promise<{ ok: true; repo: RepoInfo }> =>
     http('POST', '/github/create', input),
   localRepos: (): Promise<LocalRepoSummary[]> => http('GET', '/local-repos'),
+
+  // In-app folder browser — replaces the manual path input with a real picker.
+  fsBrowse: (path?: string, showHidden = false): Promise<FsBrowseResult> => {
+    const qs = new URLSearchParams();
+    if (path) qs.set('path', path);
+    if (showHidden) qs.set('hidden', '1');
+    const tail = qs.toString();
+    return http('GET', `/fs/browse${tail ? `?${tail}` : ''}`);
+  },
 };
 
 // SSE subscription. Returns an `unsubscribe` function.

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { GitHubAuthStatus, GitHubRepoSummary, LocalRepoSummary } from '@shared/types';
 import { useApp } from '../store';
 import { api } from '../api';
+import { FolderBrowserModal } from './FolderBrowserModal';
 import { Icon } from './Icon';
 
 // =============================================================================
@@ -42,8 +43,7 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
   const [query, setQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [showCustomPath, setShowCustomPath] = useState(false);
-  const [customPath, setCustomPath] = useState('');
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
 
   useEffect(() => {
     void loadAuthAndLists();
@@ -131,12 +131,12 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
     }
   }
 
-  async function openCustom(): Promise<void> {
-    if (!customPath.trim()) return;
-    setBusyKey('custom');
+  async function openPickedFolder(path: string): Promise<void> {
+    setBusyKey('folder');
     setError(null);
     try {
-      await openRepo(customPath.trim());
+      await openRepo(path);
+      setShowFolderBrowser(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -159,7 +159,7 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
     <div className={`repo-picker ${onClose ? 'repo-picker-overlay' : ''}`}>
       {onClose ? (
         <div className="picker-overlay-bar">
-          <h1 className="picker-overlay-title">切换仓库</h1>
+          <h1 className="picker-overlay-title">切换</h1>
           <button
             type="button"
             className="topnav-action icon-only"
@@ -172,55 +172,115 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
         </div>
       ) : null}
       <div className="picker-grid">
-        {/* ---- GitHub section ---- */}
+        {/* ---- Local clones section (priority slot — most users have the
+                repo on disk already and just want to pick it) ---- */}
+        <section className="picker-card">
+          <header className="picker-card-head">
+            <div className="picker-head-titles">
+              <h2>本地</h2>
+              <p className="picker-card-sub">
+                {localRepos.length > 0
+                  ? `${localRepos.length} 个 · 最近打开 + ${auth?.reposDir ?? '默认目录'}`
+                  : '暂无 — 从 GitHub 克隆，或浏览本地'}
+              </p>
+            </div>
+          </header>
+          {localRepos.length > 0 ? (
+            <div className="picker-list">
+              {localRepos.map((r) => {
+                const key = `local:${r.path}`;
+                const busy = busyKey === key;
+                return (
+                  <div className="picker-row" key={r.path}>
+                    <div className="picker-row-main">
+                      <div className="picker-row-title">
+                        {r.name}
+                        {r.isCurrent ? <span className="pill ok">当前</span> : null}
+                      </div>
+                      <div className="picker-row-sub">{r.path}</div>
+                    </div>
+                    <button
+                      className="btn"
+                      onClick={() => void openLocal(r)}
+                      disabled={busy || busyKey !== null}
+                    >
+                      {busy ? '…' : '打开'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </section>
+
+        {/* ---- Browse local folders (replaces the old "paste a path" textbox).
+                One click opens an in-app folder picker; the picker tags
+                git-repo subfolders so you can open them without typing. ---- */}
+        <section className="picker-card picker-card-compact">
+          <header className="picker-card-head">
+            <div className="picker-head-titles">
+              <h2>浏览</h2>
+              <p className="picker-card-sub">选个本地目录打开</p>
+            </div>
+            <button className="btn primary" onClick={() => setShowFolderBrowser(true)}>
+              <Icon name="folder" size={14} />
+              <span>浏览</span>
+            </button>
+          </header>
+        </section>
+
+        {/* ---- GitHub section (now bottom — useful for clone/create but
+                not the first thing most users need) ---- */}
         <section className="picker-card">
           <header className="picker-card-head">
             <div className="picker-head-titles">
               <h2>
                 <Icon name="github" size={18} />
-                <span>GitHub 仓库</span>
+                <span>GitHub</span>
               </h2>
               <p className="picker-card-sub">
                 {auth?.authenticated
-                  ? `已登录：${auth.user ?? '未知账号'}  ·  克隆到 ${auth.reposDir}`
-                  : '在网页里粘贴一个 Personal Access Token 即可，无需终端'}
+                  ? `${auth.user ?? '未知'} · ${auth.reposDir}`
+                  : '粘贴 Personal Access Token 登录'}
               </p>
             </div>
             {auth?.authenticated ? (
               <div className="picker-actions">
                 <button
-                  className="text-btn"
+                  type="button"
+                  className="topnav-action icon-only"
                   onClick={() => void loadAuthAndLists()}
                   disabled={loadingRepos}
+                  title={loadingRepos ? '刷新中…' : '刷新'}
+                  aria-label="刷新"
                 >
-                  {loadingRepos ? '刷新中…' : '刷新'}
+                  <Icon name="refresh" size={16} className={loadingRepos ? 'spin' : undefined} />
                 </button>
                 <button className="btn primary" onClick={() => setShowCreate(true)}>
-                  <Icon name="plus" size={14} /> 新建仓库
+                  <Icon name="plus" size={14} /> 新建
                 </button>
                 <button className="text-btn warning" onClick={() => void signOut()}>
-                  退出登录
+                  退出
                 </button>
               </div>
             ) : null}
           </header>
 
           {!auth ? (
-            <p className="picker-empty">正在检查登录状态…</p>
+            <p className="picker-empty">检查中…</p>
           ) : !auth.authenticated ? (
             <div className="picker-auth-help">
-              <p>{auth.error ?? '尚未绑定 GitHub 账号。'}</p>
+              <p>{auth.error ?? '未登录。'}</p>
               <p className="picker-auth-blurb">
-                只需要一个 Personal Access Token：点下面按钮会跳到 GitHub 的 token 创建页（已勾好
-                <code>repo</code> 权限），生成后粘贴回来就完成绑定。token 仅保存在你本机的{' '}
-                <code>~/.gittttt/token</code>（权限 600），随时可退出。
+                粘贴 Personal Access Token 即可，token 仅存在本机{' '}
+                <code>~/.gittttt/token</code>（权限 600）。
               </p>
               <div className="picker-actions">
                 <button className="btn primary" onClick={() => setShowLogin(true)}>
-                  <Icon name="github" size={14} /> 绑定 GitHub 账号
+                  <Icon name="github" size={14} /> 登录
                 </button>
                 <button className="text-btn" onClick={() => void loadAuthAndLists()}>
-                  重新检查
+                  重试
                 </button>
               </div>
             </div>
@@ -229,14 +289,14 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
               <input
                 className="picker-search"
                 type="text"
-                placeholder="按名称 / 描述过滤…"
+                placeholder="搜索…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
               <div className="picker-list">
                 {repos && filtered.length === 0 ? (
                   <p className="picker-empty">
-                    {repos.length === 0 ? '账号下没有仓库。' : '没有匹配的仓库。'}
+                    {repos.length === 0 ? '无仓库' : '无匹配'}
                   </p>
                 ) : null}
                 {filtered.map((r) => {
@@ -264,7 +324,7 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
                         onClick={() => void openOrClone(r)}
                         disabled={busy || busyKey !== null}
                       >
-                        {busy ? '处理中…' : r.localPath ? '打开' : '克隆并打开'}
+                        {busy ? '…' : r.localPath ? '打开' : '克隆'}
                       </button>
                     </div>
                   );
@@ -272,80 +332,6 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
               </div>
             </>
           )}
-        </section>
-
-        {/* ---- Local clones section ---- */}
-        {localRepos.length > 0 ? (
-          <section className="picker-card picker-card-compact">
-            <header className="picker-card-head">
-              <div className="picker-head-titles">
-                <h2>本地仓库</h2>
-                <p className="picker-card-sub">
-                  之前克隆 / 打开过的本地仓库（{auth?.reposDir ?? '默认目录'}）
-                </p>
-              </div>
-            </header>
-            <div className="picker-list">
-              {localRepos.map((r) => {
-                const key = `local:${r.path}`;
-                const busy = busyKey === key;
-                return (
-                  <div className="picker-row" key={r.path}>
-                    <div className="picker-row-main">
-                      <div className="picker-row-title">
-                        {r.name}
-                        {r.isCurrent ? <span className="pill ok">当前</span> : null}
-                      </div>
-                      <div className="picker-row-sub">{r.path}</div>
-                    </div>
-                    <button
-                      className="btn"
-                      onClick={() => void openLocal(r)}
-                      disabled={busy || busyKey !== null}
-                    >
-                      {busy ? '打开中…' : '打开'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        {/* ---- Custom path fallback ---- */}
-        <section className="picker-card picker-card-compact">
-          <header className="picker-card-head">
-            <div className="picker-head-titles">
-              <h2>打开任意本地路径</h2>
-              <p className="picker-card-sub">仓库不在管理目录里时，手动粘贴路径打开</p>
-            </div>
-            <button
-              className="text-btn"
-              onClick={() => setShowCustomPath((v) => !v)}
-            >
-              {showCustomPath ? '收起' : '展开'}
-            </button>
-          </header>
-          {showCustomPath ? (
-            <div className="picker-custom-row">
-              <input
-                type="text"
-                placeholder="/Users/you/projects/repo"
-                value={customPath}
-                onChange={(e) => setCustomPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void openCustom();
-                }}
-              />
-              <button
-                className="btn primary"
-                onClick={() => void openCustom()}
-                disabled={busyKey === 'custom' || !customPath.trim()}
-              >
-                {busyKey === 'custom' ? '打开中…' : '打开'}
-              </button>
-            </div>
-          ) : null}
         </section>
 
         {error ? <div className="picker-error">{error}</div> : null}
@@ -369,6 +355,13 @@ export function RepoPicker({ onClose }: Props = {}): JSX.Element {
             setShowCreate(false);
             await refreshAll();
           }}
+        />
+      ) : null}
+
+      {showFolderBrowser ? (
+        <FolderBrowserModal
+          onClose={() => setShowFolderBrowser(false)}
+          onPick={openPickedFolder}
         />
       ) : null}
     </div>
@@ -409,14 +402,11 @@ function TokenLoginModal({ onClose, onSignedIn }: TokenLoginModalProps): JSX.Ele
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Icon name="github" size={18} />
-          <span>绑定 GitHub 账号</span>
+          <span>登录 GitHub</span>
         </h3>
         <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.55 }}>
-          1. 点下面按钮，会在新标签页打开 GitHub 的 token 创建页（scope 已预填为 <code>repo</code> +
-          <code> delete_repo</code>，描述写好为 gittttt）。<br />
-          2. 直接点底部 <strong>Generate token</strong>，复制生成的 token。<br />
-          3. 粘贴回来这里，点 <strong>保存并登录</strong>。token 只保存在你本机
-          <code> ~/.gittttt/token</code>（权限 600），不会上传任何地方。
+          点按钮去 GitHub 生成 token（scope 已预填），粘贴回来即可。token 仅存于本机
+          <code> ~/.gittttt/token</code>。
         </p>
 
         <div className="picker-actions" style={{ marginTop: 4 }}>
@@ -428,12 +418,12 @@ function TokenLoginModal({ onClose, onSignedIn }: TokenLoginModalProps): JSX.Ele
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
           >
             <Icon name="external" size={14} />
-            <span>打开 GitHub Token 创建页</span>
+            <span>去创建 Token</span>
           </a>
         </div>
 
         <label className="modal-field">
-          <span>粘贴 Personal Access Token</span>
+          <span>Token</span>
           <textarea
             placeholder="ghp_xxx... 或 github_pat_xxx..."
             value={token}
@@ -447,7 +437,7 @@ function TokenLoginModal({ onClose, onSignedIn }: TokenLoginModalProps): JSX.Ele
               if (e.key === 'Escape') onClose();
             }}
           />
-          <span className="modal-hint">⌘/Ctrl + Enter 保存</span>
+          <span className="modal-hint">⌘/Ctrl + Enter</span>
         </label>
 
         {error ? <div className="modal-error">{error}</div> : null}
@@ -461,7 +451,7 @@ function TokenLoginModal({ onClose, onSignedIn }: TokenLoginModalProps): JSX.Ele
             onClick={() => void submit()}
             disabled={busy || token.trim().length < 20}
           >
-            {busy ? '验证中…' : '保存并登录'}
+            {busy ? '…' : '登录'}
           </button>
         </div>
       </div>
@@ -502,13 +492,13 @@ function CreateRepoModal({ reposDir, onClose, onCreated }: CreateRepoModalProps)
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: 0 }}>新建 GitHub 仓库</h3>
+        <h3 style={{ margin: 0 }}>新建仓库</h3>
         <p style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--fg-muted)' }}>
-          会同时在 GitHub 上创建并克隆到 {reposDir || '本地默认目录'}
+          克隆到 {reposDir || '默认目录'}
         </p>
 
         <label className="modal-field">
-          <span>仓库名</span>
+          <span>名称</span>
           <input
             type="text"
             placeholder="my-new-app"
@@ -521,15 +511,15 @@ function CreateRepoModal({ reposDir, onClose, onCreated }: CreateRepoModalProps)
             }}
           />
           {name && !valid ? (
-            <span className="modal-hint warning">只能包含字母、数字、点、横线、下划线。</span>
+            <span className="modal-hint warning">只允许 A-Z 0-9 . _ -</span>
           ) : null}
         </label>
 
         <label className="modal-field">
-          <span>描述（可选）</span>
+          <span>描述</span>
           <input
             type="text"
-            placeholder="一句话说明…"
+            placeholder="可选"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -556,7 +546,7 @@ function CreateRepoModal({ reposDir, onClose, onCreated }: CreateRepoModalProps)
 
         <label className="modal-checkbox">
           <input type="checkbox" checked={addReadme} onChange={(e) => setAddReadme(e.target.checked)} />
-          <span>初始化 README（推荐，避免空仓库克隆失败）</span>
+          <span>包含 README</span>
         </label>
 
         {error ? <div className="modal-error">{error}</div> : null}
@@ -566,7 +556,7 @@ function CreateRepoModal({ reposDir, onClose, onCreated }: CreateRepoModalProps)
             取消
           </button>
           <button className="btn primary" onClick={() => void submit()} disabled={!valid || busy}>
-            {busy ? '创建中…' : '创建并克隆'}
+            {busy ? '…' : '创建'}
           </button>
         </div>
       </div>

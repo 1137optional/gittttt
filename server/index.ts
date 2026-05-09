@@ -4,7 +4,9 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GitService } from './gitService.js';
 import { GitHubService } from './githubService.js';
+import { browseDirectory } from './fsBrowser.js';
 import { RepoWatcher } from './repoWatcher.js';
+import { recordRecentRepo } from './recentRepos.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const DEFAULT_REPO = process.env.GITTTTT_REPO
@@ -41,6 +43,10 @@ function attachRepo(path: string): GitService {
   activeRepoPath = abs;
   watcher = new RepoWatcher(abs, () => broadcast('repoChanged'));
   watcher.start();
+  // Persist into the "recent repos" history so the picker can list every
+  // local repo the user has touched, not just the ones that happen to live
+  // under the configured reposDir.
+  recordRecentRepo(abs);
   return git;
 }
 
@@ -410,6 +416,20 @@ app.get(
   '/api/local-repos',
   ah(async (_req, res) => {
     res.json(github.listLocalRepos(activeRepoPath));
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// In-app folder browser (drives the "open any folder" UI without a path
+// input). Returns subdirectories of `path` (defaulting to $HOME), each
+// flagged with whether it's a git repo.
+// -----------------------------------------------------------------------------
+app.get(
+  '/api/fs/browse',
+  ah(async (req, res) => {
+    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const showHidden = req.query.hidden === '1' || req.query.hidden === 'true';
+    res.json(browseDirectory(path, { showHidden }));
   }),
 );
 

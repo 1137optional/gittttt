@@ -39,6 +39,12 @@ export function CommitGraph(): JSX.Element {
 
   const layout = useMemo<GraphLayout>(() => computeGraphLayout(commits), [commits]);
 
+  // Resolve theme-driven CSS variables exactly once per theme flip and
+  // reuse the snapshot for every paint. Without this cache we'd re-run
+  // `getComputedStyle(...)` plus a dozen `getPropertyValue(...).trim()`
+  // calls on every scroll tick — measurable jank on a busy graph.
+  const themeColors = useMemo<ThemeColors>(() => readThemeColors(), [themeMode]);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -80,8 +86,9 @@ export function CommitGraph(): JSX.Element {
       commits,
       selectedHash,
       currentBranch: repoBranch,
+      colors: themeColors,
     });
-  }, [size, scrollTop, layout, commits, selectedHash, repoBranch, themeMode]);
+  }, [size, scrollTop, layout, commits, selectedHash, repoBranch, themeColors]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>): void {
     const el = e.currentTarget;
@@ -128,14 +135,12 @@ export function CommitGraph(): JSX.Element {
   function preflight(): boolean {
     if (!status) return true;
     if (status.inMerge || status.inRebase) {
-      pushToast('warn', 'Finish or abort the in-progress merge/rebase first.');
+      pushToast('warn', '请先完成或中止正在进行的合并 / 变基');
       return false;
     }
     const dirty = status.unstaged.length + status.staged.length;
     if (dirty > 0) {
-      return window.confirm(
-        `You have ${dirty} uncommitted change${dirty === 1 ? '' : 's'}. Continue anyway?`,
-      );
+      return window.confirm(`有 ${dirty} 个未提交改动，仍要继续？`);
     }
     return true;
   }
@@ -143,8 +148,8 @@ export function CommitGraph(): JSX.Element {
   function copy(text: string, label: string): void {
     navigator.clipboard
       .writeText(text)
-      .then(() => pushToast('success', `${label} copied`))
-      .catch(() => pushToast('error', 'Could not copy to clipboard'));
+      .then(() => pushToast('success', `${label} 已复制`))
+      .catch(() => pushToast('error', '复制失败'));
   }
 
   function onContextMenu(e: React.MouseEvent<HTMLDivElement>): void {
@@ -157,22 +162,22 @@ export function CommitGraph(): JSX.Element {
     const current = repoBranch || 'HEAD';
     const items: MenuItem[] = [
       {
-        label: 'Checkout this commit (detached)',
+        label: '检出此 commit（分离）',
         onClick: () => {
           if (!preflight()) return;
           void checkout(c.hash);
         },
       },
       {
-        label: 'Create branch from this commit…',
+        label: '从此 commit 新建分支…',
         onClick: () => setBranchFrom(c.hash),
       },
       { separator: true },
       {
-        label: `Cherry-pick onto ${current}`,
+        label: `Cherry-pick 到 ${current}`,
         onClick: () => {
           if (isHEAD) {
-            pushToast('warn', 'That commit is already HEAD.');
+            pushToast('warn', '已是当前 HEAD');
             return;
           }
           if (!preflight()) return;
@@ -180,7 +185,7 @@ export function CommitGraph(): JSX.Element {
         },
       },
       {
-        label: 'Revert this commit',
+        label: '撤销此 commit（revert）',
         onClick: () => {
           if (!preflight()) return;
           void revert(c.hash);
@@ -188,10 +193,10 @@ export function CommitGraph(): JSX.Element {
       },
       { separator: true },
       {
-        label: `Merge into ${current}`,
+        label: `合并到 ${current}`,
         onClick: () => {
           if (isHEAD) {
-            pushToast('warn', "Can't merge HEAD into itself.");
+            pushToast('warn', '不能把 HEAD 合并到自己');
             return;
           }
           if (!preflight()) return;
@@ -199,10 +204,10 @@ export function CommitGraph(): JSX.Element {
         },
       },
       {
-        label: `Rebase ${current} onto this commit`,
+        label: `变基 ${current} 到此 commit`,
         onClick: () => {
           if (isHEAD) {
-            pushToast('warn', 'Already on this commit.');
+            pushToast('warn', '已在此 commit 上');
             return;
           }
           if (!preflight()) return;
@@ -225,7 +230,7 @@ export function CommitGraph(): JSX.Element {
       items.push({ separator: true });
       for (const tgt of pushTargets) {
         items.push({
-          label: `Push ${repoBranch} → ${tgt}`,
+          label: `推送 ${repoBranch} → ${tgt}`,
           onClick: () => void pushTo(tgt),
         });
       }
@@ -234,12 +239,12 @@ export function CommitGraph(): JSX.Element {
     items.push(
       { separator: true },
       {
-        label: `Copy hash (${c.shortHash})`,
+        label: `复制 hash (${c.shortHash})`,
         onClick: () => copy(c.hash, 'Hash'),
       },
       {
-        label: 'Copy short hash',
-        onClick: () => copy(c.shortHash, 'Short hash'),
+        label: '复制短 hash',
+        onClick: () => copy(c.shortHash, '短 hash'),
       },
     );
     setMenu({ x: e.clientX, y: e.clientY, items });
@@ -298,17 +303,39 @@ interface DrawArgs {
   commits: Commit[];
   selectedHash: string | null;
   currentBranch: string;
+  colors: ThemeColors;
+}
+
+interface ThemeColors {
+  card: string;
+  zebra: string;
+  rowSelected: string;
+  fgMuted: string;
+  fgSecondary: string;
+  softBg: string;
+  softBorder: string;
+}
+
+// Read every theme-dependent CSS variable in one shot. The result is
+// memoised by the caller (`useMemo([themeMode])`) so we only pay this DOM
+// roundtrip on theme flips, not on scroll/resize/paint.
+function readThemeColors(): ThemeColors {
+  const r = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string): string =>
+    r.getPropertyValue(name).trim() || fallback;
+  return {
+    card: v('--canvas-card', '#ffffff'),
+    zebra: v('--canvas-zebra', '#fafbfc'),
+    rowSelected: v('--canvas-row-selected', 'rgba(0,122,255,0.07)'),
+    fgMuted: v('--fg-muted', '#8e8e93'),
+    fgSecondary: v('--fg-secondary', theme.fg.secondary),
+    softBg: v('--soft-gray', '#f0f1f4'),
+    softBorder: v('--border-strong', '#dadce0'),
+  };
 }
 
 function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
-  // Pull live theme colors from CSS variables on every paint so the graph
-  // re-themes for free when the user toggles light/dark.
-  const root = getComputedStyle(document.documentElement);
-  const themeCard = root.getPropertyValue('--canvas-card').trim() || '#ffffff';
-  const themeZebra = root.getPropertyValue('--canvas-zebra').trim() || '#fafbfc';
-  const themeRowSelected =
-    root.getPropertyValue('--canvas-row-selected').trim() || 'rgba(55,138,221,0.08)';
-  const themeFgMuted = root.getPropertyValue('--fg-muted').trim() || '#999999';
+  const { card: themeCard, zebra: themeZebra, rowSelected: themeRowSelected, fgMuted: themeFgMuted } = a.colors;
 
   ctx.fillStyle = themeCard;
   ctx.fillRect(0, 0, a.width, a.height);
@@ -365,12 +392,32 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
     } else {
-      // Diagonal — smooth bezier S-curve. Control points sit at the
-      // mid-row on each end so the line stays vertical at the endpoints
-      // and arcs across in the middle. Looks the same in solid or dashed.
-      const midY = (y1 + y2) / 2;
+      // Diagonal: arc within ONE row of the source, then run a straight
+      // vertical lane on the destination column for the rest.
+      //
+      // Previously the bezier control points sat at (y1+y2)/2, which only
+      // looked right when |dy| ≈ |dx|. For long merge curves (many rows
+      // span, one column shift) that midpoint is far away from either lane
+      // and the curve drifted off-axis, then snapped back near the
+      // endpoint — visually reads as a "broken / disconnected" line,
+      // especially under virtualisation where only part of the curve is
+      // on-screen. The arc-then-vertical shape is what GitKraken /
+      // Sourcetree use and keeps every long line on a clean lane.
+      const ROW_H_LOCAL = theme.graph.rowHeight;
+      const dy = y2 - y1;
+      const dyAbs = Math.abs(dy);
+      // Arc spans up to ROW_H, or the whole distance for short hops.
+      const arcSpan = Math.min(ROW_H_LOCAL, dyAbs);
+      const dir = dy >= 0 ? 1 : -1;
+      const arcEndY = y1 + dir * arcSpan;
+      const arcMidY = (y1 + arcEndY) / 2;
       ctx.moveTo(x1, y1);
-      ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
+      ctx.bezierCurveTo(x1, arcMidY, x2, arcMidY, x2, arcEndY);
+      if (arcEndY !== y2) {
+        // Straight lane down the parent column for the remaining distance.
+        // Same path → continuous stroke, no seam.
+        ctx.lineTo(x2, y2);
+      }
     }
     ctx.stroke();
   }
@@ -454,40 +501,92 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     }
     ctx.globalAlpha = 1;
 
-    // Branch tags next to the node — first label sits +25px right of node centre.
+    // Branch tags next to the node — first label sits +LABEL_OFFSET right of node centre.
+    //
+    // Width budget:
+    //   refsHardRight = the rightmost x a pill is allowed to touch. Below
+    //   this we always reserve `minSubjectGap` pixels for the commit
+    //   subject, otherwise the row degenerates into "all pills, no
+    //   message". The meta column on the far right is laid out separately
+    //   and is fixed-width (META_WIDTH).
+    //
+    //   maxPillTextWidth caps any single pill — without this, one
+    //   pathological ref name (e.g. an `origin/<long Unicode branch>`)
+    //   eats the whole row and pushes the hash/author/time out of view.
+    //
+    // Each pill that doesn't fit naturally is truncated with `…`. If even
+    // a truncated pill would overflow the budget we stop and emit a
+    // "+N" overflow chip so the user still sees that more refs exist.
+    const metaCellLeft = a.width - META_WIDTH - 14;
+    const minSubjectGap = 60;
+    const refsHardRight = metaCellLeft - minSubjectGap;
+    const maxPillTextWidth = 160;
+    const refPadX = 7;
+    ctx.font = `500 10.5px ${theme.font.code}`;
+
     let labelX = cx + LABEL_OFFSET;
-    for (const ref of c.refs) {
+    let drawnRefIdx = 0;
+    let firstSkippedIdx = c.refs.length;
+    for (let i = 0; i < c.refs.length; i++) {
+      const ref = c.refs[i];
+      const remaining = c.refs.length - i;
+      // Reserve room for the "+N" overflow chip when there's a chance
+      // we'll cut off later refs. ~38px is a generous estimate for "+N".
+      const reserveOverflow = remaining > 1 ? 38 : 0;
+
       const isHeadPill = ref.type === 'head';
       const isCurrent =
         ref.type === 'branch' && ref.name === a.currentBranch;
-      // Tag and remote prefixes used to be `▸ name` and `↗ name`; the
-      // unicode prefixes were dropped along with the rest of the emoji
-      // sweep — pill background colour now distinguishes ref types.
       const text = isHeadPill ? 'HEAD' : ref.name;
 
-      const pillColor = isHeadPill ? theme.accent.primary : color;
-      const softBg = root.getPropertyValue('--soft-gray').trim() || '#F5F5F5';
-      const softBorder = root.getPropertyValue('--border-strong').trim() || '#E2E4E9';
-      const fgSecondary = root.getPropertyValue('--fg-secondary').trim() || theme.fg.secondary;
-      const bg = isCurrent || isHeadPill ? withAlpha(pillColor, 0.14) : softBg;
-      const border = isCurrent || isHeadPill ? withAlpha(pillColor, 0.5) : softBorder;
-      const fg = isCurrent || isHeadPill ? pillColor : fgSecondary;
+      const naturalW = ctx.measureText(text).width + refPadX * 2;
+      const availForThisPill = refsHardRight - labelX - reserveOverflow;
+      // Need at least enough room for a single character + padding.
+      if (availForThisPill < 32) {
+        firstSkippedIdx = i;
+        break;
+      }
 
-      ctx.font = `500 10.5px ${theme.font.code}`;
-      const padX = 7;
-      const w = ctx.measureText(text).width + padX * 2;
-      drawPill(ctx, labelX, cy, w, 18, bg, border, fg, text);
-      labelX += w + 6;
+      const cappedW = Math.min(naturalW, maxPillTextWidth, availForThisPill);
+      let pillText = text;
+      if (cappedW < naturalW) {
+        pillText = truncate(ctx, text, cappedW - refPadX * 2);
+      }
+      const finalW = ctx.measureText(pillText).width + refPadX * 2;
+
+      const pillColor = isHeadPill ? theme.accent.primary : color;
+      const bg = isCurrent || isHeadPill ? withAlpha(pillColor, 0.14) : a.colors.softBg;
+      const border = isCurrent || isHeadPill ? withAlpha(pillColor, 0.5) : a.colors.softBorder;
+      const fg = isCurrent || isHeadPill ? pillColor : a.colors.fgSecondary;
+
+      drawPill(ctx, labelX, cy, finalW, 18, bg, border, fg, pillText);
+      labelX += finalW + 6;
+      drawnRefIdx = i + 1;
+    }
+    if (firstSkippedIdx < c.refs.length) {
+      const overflowText = `+${c.refs.length - firstSkippedIdx}`;
+      const ow = ctx.measureText(overflowText).width + refPadX * 2;
+      drawPill(
+        ctx,
+        labelX,
+        cy,
+        ow,
+        18,
+        a.colors.softBg,
+        a.colors.softBorder,
+        a.colors.fgMuted,
+        overflowText,
+      );
+      labelX += ow + 6;
     }
 
-    const metaCellLeft = a.width - META_WIDTH - 14;
-    const subjectStart =
-      c.refs.length > 0
-        ? labelX + 8
-        : Math.max(
-            theme.graph.leftPadding + a.layout.columnsUsed * COL_W + META_GUTTER,
-            cx + LABEL_OFFSET,
-          );
+    const drewAnyChip = drawnRefIdx > 0 || firstSkippedIdx < c.refs.length;
+    const subjectStart = drewAnyChip
+      ? labelX + 8
+      : Math.max(
+          theme.graph.leftPadding + a.layout.columnsUsed * COL_W + META_GUTTER,
+          cx + LABEL_OFFSET,
+        );
     const subjectMax = metaCellLeft - subjectStart - 8;
 
     if (subjectMax > 40) {
