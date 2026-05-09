@@ -33,6 +33,10 @@ export function CommitGraph(): JSX.Element {
   const pushToast = useApp((s) => s.pushToast);
   const loadMore = useApp((s) => s.loadMoreCommits);
   const loadingMore = useApp((s) => s.loadingMore);
+  // Subscribe to theme so the draw effect re-runs when light/dark flips.
+  // (Renamed to `themeMode` to avoid shadowing the imported design-token
+  // object, which is also called `theme`.)
+  const themeMode = useApp((s) => s.theme);
 
   const layout = useMemo<GraphLayout>(() => computeGraphLayout(commits), [commits]);
 
@@ -79,7 +83,7 @@ export function CommitGraph(): JSX.Element {
       highlighted,
       currentBranch: repoBranch,
     });
-  }, [size, scrollTop, layout, commits, selectedHash, highlighted, repoBranch]);
+  }, [size, scrollTop, layout, commits, selectedHash, highlighted, repoBranch, themeMode]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>): void {
     const el = e.currentTarget;
@@ -300,8 +304,16 @@ interface DrawArgs {
 }
 
 function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
-  // White surface — graph sits inside a card so we paint the card fill here.
-  ctx.fillStyle = '#FFFFFF';
+  // Pull live theme colors from CSS variables on every paint so the graph
+  // re-themes for free when the user toggles light/dark.
+  const root = getComputedStyle(document.documentElement);
+  const themeCard = root.getPropertyValue('--canvas-card').trim() || '#ffffff';
+  const themeZebra = root.getPropertyValue('--canvas-zebra').trim() || '#fafbfc';
+  const themeRowSelected =
+    root.getPropertyValue('--canvas-row-selected').trim() || 'rgba(55,138,221,0.08)';
+  const themeFgMuted = root.getPropertyValue('--fg-muted').trim() || '#999999';
+
+  ctx.fillStyle = themeCard;
   ctx.fillRect(0, 0, a.width, a.height);
 
   // Faint zebra stripes per row to help the eye track horizontally.
@@ -315,7 +327,7 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   for (let row = firstRow; row <= lastRow; row++) {
     if (row % 2 === 1) continue;
     const y = rowToY(row) - yOffset - ROW_H / 2;
-    ctx.fillStyle = '#FAFBFC';
+    ctx.fillStyle = themeZebra;
     ctx.fillRect(0, y, a.width, ROW_H);
   }
 
@@ -324,7 +336,7 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const c = a.commits[row];
     if (!c || c.hash !== a.selectedHash) continue;
     const y = rowToY(row) - yOffset - ROW_H / 2;
-    ctx.fillStyle = 'rgba(55,138,221,0.08)';
+    ctx.fillStyle = themeRowSelected;
     ctx.fillRect(0, y, a.width, ROW_H);
   }
 
@@ -428,14 +440,14 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.restore();
     }
 
-    // Node body — 16px circle with 2px white halo. Merges are a hollow ring
-    // so two-parent commits are still distinguishable at a glance.
+    // Node body — 16px circle with 2px halo (matching card surface so it
+    // reads as a "punched out" disc against zebra stripes / lines).
     ctx.globalAlpha = alpha;
     const r = NODE_R;
     if (c.isMerge) {
       ctx.beginPath();
       ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = themeCard;
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -443,11 +455,9 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.lineWidth = 2;
       ctx.stroke();
     } else {
-      // 2px white halo first, then the colored fill on top, so the halo
-      // reads cleanly against any underlying line or zebra stripe.
       ctx.beginPath();
       ctx.arc(cx, cy, r + NODE_BORDER, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = themeCard;
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -472,9 +482,12 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
               : ref.name;
 
       const pillColor = isHeadPill ? theme.accent.primary : color;
-      const bg = isCurrent || isHeadPill ? withAlpha(pillColor, 0.14) : '#F5F5F5';
-      const border = isCurrent || isHeadPill ? withAlpha(pillColor, 0.5) : '#E2E4E9';
-      const fg = isCurrent || isHeadPill ? pillColor : theme.fg.secondary;
+      const softBg = root.getPropertyValue('--soft-gray').trim() || '#F5F5F5';
+      const softBorder = root.getPropertyValue('--border-strong').trim() || '#E2E4E9';
+      const fgSecondary = root.getPropertyValue('--fg-secondary').trim() || theme.fg.secondary;
+      const bg = isCurrent || isHeadPill ? withAlpha(pillColor, 0.14) : softBg;
+      const border = isCurrent || isHeadPill ? withAlpha(pillColor, 0.5) : softBorder;
+      const fg = isCurrent || isHeadPill ? pillColor : fgSecondary;
 
       ctx.font = `500 10.5px ${theme.font.code}`;
       const padX = 7;
@@ -508,7 +521,7 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     // Right meta column — author + relative time, kept in muted gray so the
     // colored subject column reads as the primary signal.
     ctx.font = `400 11.5px ${theme.font.code}`;
-    ctx.fillStyle = theme.fg.muted;
+    ctx.fillStyle = themeFgMuted;
     ctx.globalAlpha = Math.min(1, alpha + 0.05);
     const author = c.authorName.split(' ')[0];
     const meta = `${c.shortHash}  ${author}  ${formatRelative(c.timestamp)}`;

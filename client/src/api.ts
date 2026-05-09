@@ -1,6 +1,10 @@
 import type {
   Branch,
   Commit,
+  CreateGitHubRepoInput,
+  GitHubAuthStatus,
+  GitHubRepoSummary,
+  LocalRepoSummary,
   RepoInfo,
   Stash,
   Tag,
@@ -90,6 +94,15 @@ export const api = {
   resolveConflict: (path: string) => http<{ ok: true }>('POST', '/resolve', { path }),
   completeMerge: () => http<{ ok: true }>('POST', '/merge/complete'),
   abortMerge: () => http<{ ok: true }>('POST', '/merge/abort'),
+
+  // GitHub integration (delegates to the local `gh` CLI on the server).
+  githubAuth: (): Promise<GitHubAuthStatus> => http('GET', '/github/auth'),
+  githubRepos: (): Promise<GitHubRepoSummary[]> => http('GET', '/github/repos'),
+  githubClone: (nameWithOwner: string): Promise<{ ok: true; alreadyPresent: boolean; repo: RepoInfo }> =>
+    http('POST', '/github/clone', { nameWithOwner }),
+  githubCreate: (input: CreateGitHubRepoInput): Promise<{ ok: true; repo: RepoInfo }> =>
+    http('POST', '/github/create', input),
+  localRepos: (): Promise<LocalRepoSummary[]> => http('GET', '/local-repos'),
 };
 
 // SSE subscription. Returns an `unsubscribe` function.

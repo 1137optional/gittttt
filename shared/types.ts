@@ -111,3 +111,50 @@ export interface ApiError {
 }
 
 export type StashAction = 'save' | 'apply' | 'pop' | 'drop';
+
+// =============================================================================
+// GitHub integration (drives /api/github/* and /api/local-repos)
+// =============================================================================
+
+/** Auth status returned by the `gh` CLI (`gh auth status`). */
+export interface GitHubAuthStatus {
+  /** True iff `gh` is installed AND a logged-in account exists for github.com. */
+  authenticated: boolean;
+  /** Logged-in handle, when known. */
+  user?: string;
+  /** Filled when `authenticated === false` to give the UI a printable reason
+   *  (e.g. "gh not installed"). */
+  error?: string;
+  /** Where the server will clone repos to (`~/gittttt-repos` by default). */
+  reposDir: string;
+}
+
+export interface GitHubRepoSummary {
+  name: string;             // "my-app"
+  nameWithOwner: string;    // "alice/my-app"
+  owner: string;            // "alice"
+  description: string;
+  visibility: 'PUBLIC' | 'PRIVATE' | 'INTERNAL';
+  isFork: boolean;
+  isArchived: boolean;
+  defaultBranch: string;
+  sshUrl: string;
+  url: string;
+  pushedAt: number;         // ms epoch
+  /** Absolute path of an already-cloned local copy, or null if not cloned yet. */
+  localPath: string | null;
+}
+
+export interface LocalRepoSummary {
+  name: string;
+  path: string;
+  currentBranchName: string;
+  isCurrent: boolean;       // true iff this is the repo currently open in the app
+}
+
+export interface CreateGitHubRepoInput {
+  name: string;
+  description?: string;
+  isPrivate: boolean;
+  addReadme?: boolean;
+}

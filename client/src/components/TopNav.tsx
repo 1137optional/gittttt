@@ -7,6 +7,8 @@ export function TopNav(): JSX.Element {
   const searchQuery = useApp((s) => s.searchQuery);
   const setSearchQuery = useApp((s) => s.setSearchQuery);
   const refreshAll = useApp((s) => s.refreshAll);
+  const theme = useApp((s) => s.theme);
+  const toggleTheme = useApp((s) => s.toggleTheme);
 
   const [showSearch, setShowSearch] = useState(false);
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -44,6 +46,14 @@ export function TopNav(): JSX.Element {
 
       <div className="topnav-spacer" />
 
+      <button
+        className="topnav-action"
+        onClick={() => toggleTheme()}
+        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      >
+        {theme === 'dark' ? '☀' : '☾'}
+      </button>
       <button
         className="topnav-action"
         onClick={() => void refreshAll()}

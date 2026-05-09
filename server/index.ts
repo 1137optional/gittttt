@@ -3,6 +3,7 @@ import cors from 'cors';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GitService } from './gitService.js';
+import { GitHubService } from './githubService.js';
 import { RepoWatcher } from './repoWatcher.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -15,7 +16,9 @@ const DEFAULT_REPO = process.env.GITTTTT_REPO
 // repos at runtime through POST /api/repo/open.
 // -----------------------------------------------------------------------------
 let git: GitService | null = null;
+let activeRepoPath: string | null = null;
 let watcher: RepoWatcher | null = null;
+const github = new GitHubService();
 const sseClients = new Set<Response>();
 
 function broadcast(event: string, data: unknown = {}): void {
@@ -35,6 +38,7 @@ function attachRepo(path: string): GitService {
       broadcast('repoChanged');
     },
   });
+  activeRepoPath = abs;
   watcher = new RepoWatcher(abs, () => broadcast('repoChanged'));
   watcher.start();
   return git;
@@ -331,6 +335,66 @@ app.post(
   ah(async (_req, res) => {
     await ensureGit().abortMerge();
     res.json({ ok: true });
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// GitHub integration (delegates to the local `gh` CLI)
+//   GET  /api/github/auth     — auth status + configured repos dir
+//   GET  /api/github/repos    — list user's GitHub repos
+//   POST /api/github/clone    — clone {nameWithOwner}, then open it
+//   POST /api/github/create   — create+clone {name,description,...}, open it
+//   GET  /api/local-repos     — list local clones in the repos dir + active repo
+// -----------------------------------------------------------------------------
+app.get('/api/github/auth', ah(async (_req, res) => res.json(await github.getAuthStatus())));
+app.get('/api/github/repos', ah(async (_req, res) => res.json(await github.listRepos())));
+
+app.post(
+  '/api/github/clone',
+  ah(async (req, res) => {
+    const { nameWithOwner } = req.body as { nameWithOwner?: string };
+    if (!nameWithOwner) {
+      res.status(400).json({ error: 'nameWithOwner is required' });
+      return;
+    }
+    const { path, alreadyPresent } = await github.cloneRepo(nameWithOwner);
+    const svc = attachRepo(path);
+    const info = await svc.getRepoInfo();
+    broadcast('repoChanged');
+    res.json({ ok: true, alreadyPresent, repo: info });
+  }),
+);
+
+app.post(
+  '/api/github/create',
+  ah(async (req, res) => {
+    const body = req.body as {
+      name?: string;
+      description?: string;
+      isPrivate?: boolean;
+      addReadme?: boolean;
+    };
+    if (!body.name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const { path } = await github.createRepo({
+      name: body.name,
+      description: body.description ?? '',
+      isPrivate: !!body.isPrivate,
+      addReadme: body.addReadme !== false, // default true so the clone isn't empty
+    });
+    const svc = attachRepo(path);
+    const info = await svc.getRepoInfo();
+    broadcast('repoChanged');
+    res.json({ ok: true, repo: info });
+  }),
+);
+
+app.get(
+  '/api/local-repos',
+  ah(async (_req, res) => {
+    res.json(github.listLocalRepos(activeRepoPath));
   }),
 );
 

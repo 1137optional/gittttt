@@ -39,6 +39,11 @@ interface AppState {
   //   'docs'     — Markdown-style doc page explaining the right-click menu
   leftPage: 'branches' | 'docs';
   setLeftPage(page: 'branches' | 'docs'): void;
+  /** Active visual theme. The flag is mirrored to <html data-theme=…> and
+   *  persisted in localStorage; default follows the OS preference. */
+  theme: 'light' | 'dark';
+  setTheme(theme: 'light' | 'dark'): void;
+  toggleTheme(): void;
 
   // ui state
   isLoading: boolean;        // global blocker for pull/push/sync
@@ -82,6 +87,30 @@ interface AppState {
 }
 
 let nextToastId = 1;
+
+const THEME_KEY = 'gittttt:theme';
+
+function readInitialTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const saved = window.localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    // localStorage may be blocked (private mode, sandbox); fall through.
+  }
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
+  return 'light';
+}
+
+function applyTheme(theme: 'light' | 'dark'): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme;
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // ignore — theme just won't persist across reloads
+  }
+}
 
 // Pretty-print a ref string for toast messages. Hashes (40-char hex) are
 // shortened to 7 chars; branch / tag names are left alone.
@@ -155,6 +184,22 @@ export const useApp = create<AppState>((set, get) => {
     leftPage: 'branches',
     setLeftPage(page) {
       set({ leftPage: page });
+    },
+    theme: (() => {
+      const t = readInitialTheme();
+      // Sync the DOM immediately so the first paint already matches the
+      // resolved theme (avoids a light → dark flash on cold load).
+      applyTheme(t);
+      return t;
+    })(),
+    setTheme(theme) {
+      applyTheme(theme);
+      set({ theme });
+    },
+    toggleTheme() {
+      const next = get().theme === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      set({ theme: next });
     },
     isLoading: false,
     loadingMore: false,

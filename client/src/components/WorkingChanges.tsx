@@ -12,8 +12,10 @@ const STATUS_LABEL: Record<FileStatus['status'], string> = {
   conflicted: '!',
 };
 
-// Working-tree pane shown inside the bottom-panel "Working Changes" tab.
-// Three columns: unstaged | staged | commit composer.
+// Working-tree pane — the only page rendered in the right sidebar.
+// Stacked vertically: Unstaged list, Staged list, Commit composer (with
+// Stash/Pop). When Docs land in the right sidebar later, a small page nav
+// will sit at the top to switch between them.
 export function WorkingChanges(): JSX.Element {
   const status = useApp((s) => s.status);
   const stageFiles = useApp((s) => s.stageFiles);
