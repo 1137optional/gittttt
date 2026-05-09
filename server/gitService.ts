@@ -639,6 +639,13 @@ export class GitService {
     });
   }
 
+  /** Push local branch `localBranch` to `remoteRef` on origin (refspec local:remote). */
+  pushTo(localBranch: string, remoteRef: string): Promise<void> {
+    return this.mutate('pushTo', async () => {
+      await this.git.push('origin', `${localBranch}:${remoteRef}`);
+    });
+  }
+
   pull(branch?: string): Promise<void> {
     return this.mutate('pull', async () => {
       if (branch) {

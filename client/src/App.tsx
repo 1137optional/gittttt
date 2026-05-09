@@ -4,7 +4,7 @@ import { subscribeRepoChanged } from './api';
 import { TopNav } from './components/TopNav';
 import { Sidebar } from './components/Sidebar';
 import { CommitGraph } from './components/CommitGraph';
-import { BottomPanel } from './components/BottomPanel';
+import { WorkingChanges } from './components/WorkingChanges';
 import { RepoPicker } from './components/RepoPicker';
 import { ToastStack } from './components/ToastStack';
 
@@ -47,8 +47,12 @@ export default function App(): JSX.Element {
           <CommitGraph />
         </div>
       </div>
-      <div className="detail-area">
-        <BottomPanel />
+      <div className="pages-area">
+        {/* Right sidebar = a single page: Working Changes (stage / unstage
+            / commit composer). The old Overview and Commit Detail tabs
+            were dropped — the graph row already carries the per-commit
+            info, and stat cards on a tiny repo were noise. */}
+        <WorkingChanges />
       </div>
       <ToastStack />
     </div>

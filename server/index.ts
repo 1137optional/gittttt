@@ -262,6 +262,19 @@ app.post(
 );
 
 app.post(
+  '/api/push-to',
+  ah(async (req, res) => {
+    const { localBranch, remoteRef } = req.body as { localBranch?: string; remoteRef?: string };
+    if (!localBranch || !remoteRef) {
+      res.status(400).json({ error: 'localBranch and remoteRef are required' });
+      return;
+    }
+    await ensureGit().pushTo(localBranch, remoteRef);
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
   '/api/pull',
   ah(async (req, res) => {
     await ensureGit().pull(req.body?.branch);

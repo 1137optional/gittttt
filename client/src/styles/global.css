@@ -36,7 +36,7 @@
 
   --top-h: 70px;
   --side-w: 240px;
-  --detail-w: 360px;
+  --pages-w: 320px;
   --transition: 150ms ease;
 
   color-scheme: light;
@@ -121,21 +121,21 @@ code,
 
 /* =============================================================================
    App layout
-     ┌─────────────────────────────────────────────────┐
-     │ topnav                                          │
-     ├──────────┬─────────────────────────┬────────────┤
-     │ sidebar  │ commit graph            │ detail /   │
-     │          │                         │ changes    │
-     └──────────┴─────────────────────────┴────────────┘
+     ┌─────────────────────────────────────────────────────┐
+     │ topnav                                              │
+     ├──────────┬─────────────────────────────┬────────────┤
+     │ sidebar  │ commit graph (full height)  │ working    │
+     │ (2 pages)│                             │ changes    │
+     └──────────┴─────────────────────────────┴────────────┘
    ============================================================================= */
 
 .app {
   display: grid;
   grid-template-rows: var(--top-h) 1fr;
-  grid-template-columns: var(--side-w) 1fr var(--detail-w);
+  grid-template-columns: var(--side-w) 1fr var(--pages-w);
   grid-template-areas:
     "top top top"
-    "side main detail";
+    "side main pages";
   height: 100vh;
   overflow: hidden;
   background: var(--page);
@@ -147,7 +147,11 @@ code,
   grid-area: side;
   background: var(--bg);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
 }
 .main-area {
   grid-area: main;
@@ -156,12 +160,15 @@ code,
   min-height: 0;
   min-width: 0;
 }
-.detail-area {
-  grid-area: detail;
+.pages-area {
+  grid-area: pages;
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
 }
 
 /* =============================================================================
@@ -279,9 +286,107 @@ code,
 .sidebar {
   display: flex;
   flex-direction: column;
-  padding: 18px 14px 22px;
+  height: 100%;
+  min-height: 0;
+  padding: 0 0 14px;
+  gap: 0;
+}
+.left-nav-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 10px 0;
+  gap: 4px;
+  background: var(--bg);
+}
+.left-nav-tab {
+  flex: 1 1 0;
+  padding: 8px 6px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+.left-nav-tab:hover {
+  color: var(--fg-primary);
+  background: var(--soft-gray);
+}
+.left-nav-tab.active {
+  color: var(--brand-deep);
+  border-bottom-color: var(--brand);
+  background: transparent;
+}
+.sidebar-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 8px;
   gap: 22px;
 }
+
+/* Left sidebar — Docs page (commit context menu reference) */
+.left-docs-pane {
+  user-select: text;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-body);
+}
+.left-docs-lead {
+  margin: 0 0 14px;
+  color: var(--fg-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.left-docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.left-docs-table th,
+.left-docs-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.left-docs-table th {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  border-bottom-color: var(--border-strong);
+}
+.left-docs-table td:first-child {
+  width: 38%;
+  font-weight: 500;
+  color: var(--fg-primary);
+}
+.left-docs-table td.mono {
+  font-family: var(--font-code);
+  font-size: 10px;
+  font-weight: 500;
+}
+.left-docs-table code,
+.left-docs-table .nowrap {
+  font-family: var(--font-code);
+  font-size: 10px;
+  background: var(--soft-gray);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.left-docs-table .nowrap {
+  white-space: nowrap;
+}
+
 .sidebar-section {
   display: flex;
   flex-direction: column;
@@ -295,31 +400,6 @@ code,
   color: var(--fg-muted);
   padding: 0 6px;
 }
-.new-branch-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--brand);
-  color: #fff;
-  font-weight: 500;
-  font-size: 12.5px;
-  border: none;
-  cursor: pointer;
-  transition: background var(--transition), box-shadow var(--transition);
-}
-.new-branch-btn:hover {
-  background: var(--brand-deep);
-  box-shadow: 0 2px 8px rgba(55, 138, 221, 0.35);
-}
-.new-branch-btn .plus {
-  font-weight: 600;
-  font-size: 14px;
-  line-height: 1;
-}
-
 .branch-list {
   display: flex;
   flex-direction: column;
@@ -425,7 +505,7 @@ code,
 
 .graph-pane {
   background: var(--bg);
-  margin: 16px 8px 16px 16px;
+  margin: 16px;
   border-radius: 10px;
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border);
@@ -480,209 +560,8 @@ code,
 }
 
 /* =============================================================================
-   Bottom panel — tabs + content (Commit Detail / Working Changes)
+   File rows (Working Changes)
    ============================================================================= */
-
-.bottom-pane {
-  background: var(--bg);
-  margin: 16px 16px 16px 8px;
-  border-radius: 10px;
-  box-shadow: var(--shadow-card);
-  border: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
-  flex: 1 1 auto;
-}
-.bottom-tabs {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  padding: 0 8px;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.bottom-tab {
-  padding: 12px 14px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--fg-secondary);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: color var(--transition), border-color var(--transition);
-}
-.bottom-tab:hover {
-  color: var(--fg-primary);
-}
-.bottom-tab.active {
-  color: var(--brand-deep);
-  border-bottom-color: var(--brand);
-}
-.bottom-tab .pill {
-  font-family: var(--font-code);
-  font-size: 10px;
-  background: var(--soft-gray);
-  color: var(--fg-secondary);
-  padding: 1px 7px;
-  border-radius: 8px;
-}
-.bottom-tab.active .pill {
-  background: var(--brand-tint);
-  color: var(--brand-deep);
-}
-.bottom-tabs .spacer {
-  flex: 1 1 auto;
-}
-.bottom-tabs .spacer-actions {
-  display: flex;
-  gap: 4px;
-  padding: 0 8px;
-}
-.bottom-content {
-  overflow: auto;
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-/* -------- Commit detail (light) -------- */
-
-.detail-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--brand);
-  color: #fff;
-  font-weight: 600;
-  font-size: 12.5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  letter-spacing: 0.02em;
-  flex: 0 0 auto;
-  box-shadow: 0 2px 6px rgba(55, 138, 221, 0.25);
-}
-.detail-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.detail-text .subject {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-primary);
-  margin: 0 0 3px;
-  line-height: 1.4;
-}
-.detail-text .meta {
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  font-family: var(--font-code);
-  margin-bottom: 8px;
-}
-.detail-text .body {
-  font-size: 12.5px;
-  color: var(--fg-body);
-  white-space: pre-wrap;
-  line-height: 1.55;
-}
-.detail-actions {
-  display: flex;
-  gap: 6px;
-}
-.icon-btn-light {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg);
-  color: var(--fg-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  transition: background var(--transition), color var(--transition);
-}
-.icon-btn-light:hover {
-  background: var(--soft-gray);
-  color: var(--fg-primary);
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  border-bottom: 1px solid var(--border);
-}
-.detail-grid .cell {
-  padding: 12px 14px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.detail-grid .cell:nth-child(2n) {
-  border-right: none;
-}
-.detail-grid .cell:nth-last-child(-n + 2) {
-  border-bottom: none;
-}
-.detail-grid .label {
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
-}
-.detail-grid .value {
-  font-family: var(--font-code);
-  font-size: 13px;
-  color: var(--fg-primary);
-  font-weight: 500;
-}
-.detail-grid .value.add {
-  color: var(--success);
-}
-.detail-grid .value.del {
-  color: var(--error);
-}
-
-.changed-files {
-  padding: 10px 12px 16px;
-}
-.changed-files h4 {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
-  margin: 4px 8px 8px;
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-.changed-files h4 .count {
-  color: var(--fg-faint);
-}
-.empty-state {
-  padding: 36px 20px;
-  text-align: center;
-  color: var(--fg-muted);
-  font-size: 13px;
-}
 
 .file-row {
   display: flex;

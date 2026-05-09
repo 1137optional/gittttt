@@ -1,7 +1,6 @@
 import type {
   Branch,
   Commit,
-  CommitDetailData,
   RepoInfo,
   Stash,
   Tag,
@@ -52,13 +51,14 @@ export const api = {
   getCommitCount: (): Promise<{ count: number }> => http('GET', '/commits/count'),
   getCommitsRange: (skip: number, limit: number): Promise<Commit[]> =>
     http('GET', `/commits?skip=${skip}&limit=${limit}`),
-  getCommitDetail: (hash: string): Promise<CommitDetailData> =>
-    http('GET', `/commits/${encodeURIComponent(hash)}`),
   getStatus: (): Promise<WorkingTreeStatus> => http('GET', '/status'),
   searchCommits: (q: string): Promise<string[]> =>
     http('GET', `/search?q=${encodeURIComponent(q)}`),
 
   // mutations
+  pushTo: (body: { localBranch: string; remoteRef: string }) =>
+    http<{ ok: true }>('POST', '/push-to', body),
+
   checkout: (branch: string) => http<{ ok: true }>('POST', '/checkout', { branch }),
   merge: (branch: string) =>
     http<{ ok: boolean; conflicts?: string[] }>('POST', '/merge', { branch }),

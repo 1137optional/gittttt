@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import type {
   Branch,
   Commit,
-  CommitDetailData,
   RepoInfo,
   Stash,
   Tag,
@@ -33,16 +32,18 @@ interface AppState {
 
   // selection / UI
   selectedCommitHash: string | null;
-  commitDetail: CommitDetailData | null;
   searchQuery: string;
   highlightedHashes: Set<string>;
+  // Which page is shown in the LEFT sidebar.
+  //   'branches' — the existing tree (branches / remotes / stash)
+  //   'docs'     — Markdown-style doc page explaining the right-click menu
+  leftPage: 'branches' | 'docs';
+  setLeftPage(page: 'branches' | 'docs'): void;
 
   // ui state
   isLoading: boolean;        // global blocker for pull/push/sync
   loadingMore: boolean;       // commit pagination in flight
   toasts: Toast[];
-  bottomTab: 'detail' | 'changes';
-  setBottomTab(tab: 'detail' | 'changes'): void;
 
   // actions
   init(): Promise<void>;
@@ -55,6 +56,8 @@ interface AppState {
 
   pull(): Promise<void>;
   push(): Promise<void>;
+  /** Push the current local branch to `remoteRef` on origin (`git push origin current:remoteRef`). */
+  pushTo(remoteRef: string): Promise<void>;
   sync(): Promise<void>;
 
   checkout(branch: string): Promise<void>;
@@ -130,15 +133,10 @@ export const useApp = create<AppState>((set, get) => {
       totalCommitCount: count.count,
       commits,
     });
-    // Refresh detail for the currently selected commit if it's still around.
+    // Drop the selected hash if the underlying commit was rewritten / pruned.
     const selected = get().selectedCommitHash;
-    if (selected) {
-      try {
-        const detail = await api.getCommitDetail(selected);
-        set({ commitDetail: detail });
-      } catch {
-        set({ commitDetail: null, selectedCommitHash: null });
-      }
+    if (selected && !commits.some((c) => c.hash === selected)) {
+      set({ selectedCommitHash: null });
     }
   };
 
@@ -152,16 +150,15 @@ export const useApp = create<AppState>((set, get) => {
     totalCommitCount: 0,
     status: null,
     selectedCommitHash: null,
-    commitDetail: null,
     searchQuery: '',
     highlightedHashes: new Set<string>(),
+    leftPage: 'branches',
+    setLeftPage(page) {
+      set({ leftPage: page });
+    },
     isLoading: false,
     loadingMore: false,
     toasts: [],
-    bottomTab: 'changes',
-    setBottomTab(tab) {
-      set({ bottomTab: tab });
-    },
 
     async init() {
       await wrap(reloadCore);
@@ -199,14 +196,10 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     async selectCommit(hash) {
-      // Clicking a commit also flips the bottom panel to the detail tab
-      // — that's where the new info should land.
-      set({ selectedCommitHash: hash, commitDetail: null, bottomTab: hash ? 'detail' : get().bottomTab });
-      if (!hash) return;
-      await wrap(async () => {
-        const detail = await api.getCommitDetail(hash);
-        if (get().selectedCommitHash === hash) set({ commitDetail: detail });
-      });
+      // Selection is purely a graph-row highlight now — the detail panel is
+      // gone, so this is just a synchronous setter behind an async signature
+      // (kept async to avoid churning the call sites).
+      set({ selectedCommitHash: hash });
     },
 
     async setSearchQuery(q) {
@@ -242,6 +235,22 @@ export const useApp = create<AppState>((set, get) => {
       });
       set({ isLoading: false });
       if (ok) get().pushToast('success', 'Pushed successfully');
+      await get().refreshAll();
+    },
+
+    async pushTo(remoteRef) {
+      const local = get().repo?.currentBranchName;
+      if (!local) {
+        get().pushToast('warn', 'Detached HEAD — check out a branch before pushing.');
+        return;
+      }
+      set({ isLoading: true });
+      const ok = await wrap(async () => {
+        await api.pushTo({ localBranch: local, remoteRef });
+        return true;
+      });
+      set({ isLoading: false });
+      if (ok) get().pushToast('success', `Pushed ${local} → ${remoteRef}`);
       await get().refreshAll();
     },
 

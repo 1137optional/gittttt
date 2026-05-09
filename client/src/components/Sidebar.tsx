@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../store';
 import { hashIndex, theme } from '../theme';
 import { ContextMenu, type MenuItem } from './ContextMenu';
-import { NewBranchModal } from './NewBranchModal';
+import { LeftDocs } from './LeftDocs';
 import type { Branch } from '@shared/types';
 // Note: contributor / commit / branch / tag stats used to live in this
 // sidebar but were dropped — they didn't pull their visual weight and
@@ -36,9 +36,10 @@ export function Sidebar(): JSX.Element {
   const deleteBranch = useApp((s) => s.deleteBranch);
   const stash = useApp((s) => s.stash);
   const pushToast = useApp((s) => s.pushToast);
+  const leftPage = useApp((s) => s.leftPage);
+  const setLeftPage = useApp((s) => s.setLeftPage);
 
   const [ctx, setCtx] = useState<CtxState | null>(null);
-  const [showNew, setShowNew] = useState(false);
 
   const local = useMemo(
     () => branches.filter((b) => !b.isRemote).sort((a, b) => a.name.localeCompare(b.name)),
@@ -104,12 +105,31 @@ export function Sidebar(): JSX.Element {
 
   return (
     <div className="sidebar">
+      <div className="left-nav-tabs">
+        <button
+          type="button"
+          className={`left-nav-tab ${leftPage === 'branches' ? 'active' : ''}`}
+          onClick={() => setLeftPage('branches')}
+        >
+          Branches
+        </button>
+        <button
+          type="button"
+          className={`left-nav-tab ${leftPage === 'docs' ? 'active' : ''}`}
+          onClick={() => setLeftPage('docs')}
+        >
+          Docs
+        </button>
+      </div>
+
+      <div className="sidebar-body">
+        {leftPage === 'docs' ? (
+          <LeftDocs />
+        ) : (
+          <>
       {/* ---- Branches ---- */}
       <div className="sidebar-section">
         <div className="section-label">Branches</div>
-        <button className="new-branch-btn" onClick={() => setShowNew(true)}>
-          <span className="plus">＋</span> New branch
-        </button>
         <div className="branch-list">
           {local.map((b) => (
             <div
@@ -217,9 +237,11 @@ export function Sidebar(): JSX.Element {
           </div>
         </div>
       ) : null}
+          </>
+        )}
+      </div>
 
       {ctx ? <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={() => setCtx(null)} /> : null}
-      {showNew ? <NewBranchModal onClose={() => setShowNew(false)} /> : null}
     </div>
   );
 }

@@ -29,6 +29,7 @@ export function CommitGraph(): JSX.Element {
   const rebase = useApp((s) => s.rebase);
   const cherryPick = useApp((s) => s.cherryPick);
   const revert = useApp((s) => s.revert);
+  const pushTo = useApp((s) => s.pushTo);
   const pushToast = useApp((s) => s.pushToast);
   const loadMore = useApp((s) => s.loadMoreCommits);
   const loadingMore = useApp((s) => s.loadingMore);
@@ -206,6 +207,29 @@ export function CommitGraph(): JSX.Element {
           void rebase(c.hash);
         },
       },
+    ];
+
+    const pushTargets =
+      repoBranch !== ''
+        ? Array.from(
+            new Set(
+              c.refs
+                .filter((r) => r.type === 'branch' && r.name && r.name !== repoBranch)
+                .map((r) => r.name as string),
+            ),
+          ).sort((a, b) => a.localeCompare(b))
+        : [];
+    if (pushTargets.length > 0) {
+      items.push({ separator: true });
+      for (const tgt of pushTargets) {
+        items.push({
+          label: `Push ${repoBranch} → ${tgt}`,
+          onClick: () => void pushTo(tgt),
+        });
+      }
+    }
+
+    items.push(
       { separator: true },
       {
         label: `Copy hash (${c.shortHash})`,
@@ -215,7 +239,7 @@ export function CommitGraph(): JSX.Element {
         label: 'Copy short hash',
         onClick: () => copy(c.shortHash, 'Short hash'),
       },
-    ];
+    );
     setMenu({ x: e.clientX, y: e.clientY, items });
   }
 
