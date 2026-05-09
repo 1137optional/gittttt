@@ -539,7 +539,7 @@ export class GitService {
       try {
         await this.git.merge([source]);
         return { ok: true };
-      } catch (e: any) {
+      } catch (e) {
         const status = await this.git.status();
         if (status.conflicted.length > 0) {
           return { ok: false, conflicts: status.conflicted };
@@ -554,7 +554,7 @@ export class GitService {
       try {
         await this.git.rebase([target]);
         return { ok: true };
-      } catch (e: any) {
+      } catch (e) {
         const status = await this.git.status();
         if (status.conflicted.length > 0) {
           return { ok: false, conflicts: status.conflicted };

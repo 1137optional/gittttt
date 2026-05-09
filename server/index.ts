@@ -1,7 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { GitService } from './gitService.js';
 import { GitHubService } from './githubService.js';
 import { browseDirectory } from './fsBrowser.js';
@@ -9,9 +10,34 @@ import { RepoWatcher } from './repoWatcher.js';
 import { recordRecentRepo } from './recentRepos.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
+// Default to loopback only — this server has no auth and grants full read/write
+// on the local filesystem + the user's GitHub PAT. Binding to 0.0.0.0 would
+// turn it into a remote-shell on the LAN. Override with $HOST if you really
+// know what you're doing (e.g. running behind a reverse proxy that does authn).
+const HOST = process.env.HOST || '127.0.0.1';
 const DEFAULT_REPO = process.env.GITTTTT_REPO
   ? resolve(process.env.GITTTTT_REPO)
   : process.cwd();
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// In production we serve the built client out of dist/client from the same
+// origin as the API, so requests are same-origin and we don't need CORS at
+// all. In dev the client is served from Vite on :5173 and proxies /api/* to
+// us — Vite's proxy makes the browser see same-origin too, but a developer
+// hitting the API straight from another origin (curl, Postman, …) still
+// works because we explicitly allow common loopback origins.
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+]);
+if (process.env.GITTTTT_ALLOW_ORIGIN) {
+  for (const o of process.env.GITTTTT_ALLOW_ORIGIN.split(',')) {
+    const trimmed = o.trim();
+    if (trimmed) ALLOWED_ORIGINS.add(trimmed);
+  }
+}
 
 // -----------------------------------------------------------------------------
 // App-wide singleton: active GitService and watcher. We support switching
@@ -66,7 +92,22 @@ function ah<T>(
 }
 
 const app = express();
-app.use(cors());
+// Strict CORS allowlist. Without this, any web page the user visited could
+// fetch http://localhost:3001/api/repo/open with a malicious path and get
+// the local Git agent to operate on it (no SOP protection because we'd
+// echo Access-Control-Allow-Origin: *). The allowlist + reflected origin
+// pattern blocks third-party origins at the preflight stage.
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Same-origin requests (no Origin header) are fine.
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+      cb(new Error(`Origin not allowed: ${origin}`));
+    },
+    credentials: false,
+  }),
+);
 app.use(express.json({ limit: '5mb' }));
 
 // -----------------------------------------------------------------------------
@@ -452,6 +493,33 @@ app.get('/events', (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// Static client (production only). In dev Vite serves the client on :5173 and
+// proxies /api -> :3001, so we leave HTTP routing alone. In production we
+// build the client to dist/client and serve it from the SAME origin so the
+// whole app is one process, one port, no CORS surface, no separate static
+// host required.
+// -----------------------------------------------------------------------------
+if (IS_PRODUCTION) {
+  // dist/server/index.js -> ../client/  (relative to the compiled output)
+  const here = dirname(fileURLToPath(import.meta.url));
+  const clientDist = resolve(here, '..', 'client');
+  if (existsSync(clientDist)) {
+    app.use(express.static(clientDist, { index: false, maxAge: '1h' }));
+    // SPA fallback: anything that isn't /api/*, /events, or a real file goes
+    // to index.html so client-side routing (if any) works.
+    app.get(/^(?!\/(?:api|events)(?:$|\/)).*/, (_req, res) => {
+      res.sendFile(join(clientDist, 'index.html'));
+    });
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[gittttt] NODE_ENV=production but ${clientDist} is missing; ` +
+        `run "npm run build" before "npm start".`,
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Errors
 // -----------------------------------------------------------------------------
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {
@@ -463,9 +531,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void =>
 // -----------------------------------------------------------------------------
 // Boot
 // -----------------------------------------------------------------------------
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
-  console.log(`[gittttt] server listening on http://localhost:${PORT}`);
+  console.log(`[gittttt] server listening on http://${HOST}:${PORT}`);
   if (existsSync(DEFAULT_REPO)) {
     try {
       attachRepo(DEFAULT_REPO);

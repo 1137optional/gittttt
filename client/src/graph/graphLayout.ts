@@ -197,12 +197,25 @@ export function computeGraphLayout(commits: Commit[]): GraphLayout {
       for (let i = 1; i < c.parentHashes.length; i++) {
         const p = c.parentHashes[i];
         let pCol = columnPool.findIndex((x) => x === p);
-        if (pCol === -1) {
+        const wasFreshlyAllocated = pCol === -1;
+        if (wasFreshlyAllocated) {
           pCol = allocColumn();
           columnPool[pCol] = p;
           justAllocated.add(pCol);
         }
-        columnWasFirstParent[pCol] = false;
+        // Only flip the lane into "merge-transit" mode when WE are the one
+        // creating the lane. If pCol was already reserved as some earlier
+        // commit's first-parent (e.g. main lane waiting for an off-window
+        // ancestor), keep its first-parent flag intact — otherwise the
+        // step-4 passthrough loop suppresses every passthrough on that
+        // lane between this row and the parent's row, leaving a visible
+        // gap in the lane while the merge bezier (which doubles back to
+        // the same lane in the same colour) then "reappears" further
+        // down. Net effect is two disconnected segments of the same
+        // colour, which reads as a broken line.
+        if (wasFreshlyAllocated) {
+          columnWasFirstParent[pCol] = false;
+        }
         const color = allocColor(pCol);
         pending.push({
           fromHash: c.hash,
