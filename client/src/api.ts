@@ -64,8 +64,14 @@ export const api = {
     http<{ ok: boolean; conflicts?: string[] }>('POST', '/merge', { branch }),
   rebase: (branch: string) =>
     http<{ ok: boolean; conflicts?: string[] }>('POST', '/rebase', { branch }),
+  cherryPick: (hash: string) =>
+    http<{ ok: boolean; conflicts?: string[] }>('POST', '/cherry-pick', { hash }),
+  revert: (hash: string) =>
+    http<{ ok: boolean; conflicts?: string[] }>('POST', '/revert', { hash }),
   deleteBranch: (name: string, force = false) =>
     http<{ ok: true }>('POST', '/branches/delete', { name, force }),
+  createBranch: (name: string, opts: { from?: string; checkout?: boolean } = {}) =>
+    http<{ ok: true }>('POST', '/branches/create', { name, ...opts }),
 
   stage: (files: string[]) => http<{ ok: true }>('POST', '/stage', { files }),
   stageAll: () => http<{ ok: true }>('POST', '/stage', { all: true }),

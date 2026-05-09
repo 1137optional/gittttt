@@ -33,13 +33,22 @@ export interface NodePosition {
   column: number;
 }
 
+// Discriminator the renderer uses to pick line-style.
+//   'vertical'   — straight passthrough on a single lane (main flow)
+//   'merge'      — diagonal joining a merge commit to a non-first parent;
+//                  drawn as a solid bezier (visualises "merging back")
+//   'branch-out' — diagonal first-parent line that ends up on a different lane
+//                  because column reuse pushed the parent leftward;
+//                  drawn as a dashed bezier (visualises "branched off main")
+export type LineKind = 'vertical' | 'merge' | 'branch-out';
+
 export interface GraphLine {
   fromRow: number;
   fromCol: number;
   toRow: number;
   toCol: number;
   color: string;
-  branchTip?: boolean; // line emerging from a "merge-in" column above
+  kind: LineKind;
 }
 
 export interface GraphLayout {
@@ -56,6 +65,11 @@ export function computeGraphLayout(commits: Commit[]): GraphLayout {
   // columnPool[col] = hash of the commit this column is currently waiting for,
   // or null if the column is free and reusable.
   const columnPool: (string | null)[] = [];
+  // For each waiting column, track whether the descendant that registered the
+  // wait did so as a first-parent (the lane is the descendant's main flow) or
+  // as a merge-side parent. The renderer uses this to draw branch-creation
+  // diagonals dashed and merge-back diagonals as solid curves.
+  const columnWasFirstParent: boolean[] = [];
   // Stable color per column index. Once a column is assigned a color it keeps
   // that color for the lifetime of this layout.
   const columnColor: string[] = [];
@@ -83,15 +97,17 @@ export function computeGraphLayout(commits: Commit[]): GraphLayout {
 
   // We accumulate parent->row lookups so we can finalize line segments after
   // the loop (some parents are referenced before we know which row hosts them).
-  // Each pending line records (fromHash, fromCol, toHash, color); we resolve
-  // toRow once the parent is processed.
+  // Each pending line records the source plus a flag describing how it was
+  // produced — first parent vs. merge-side parent — so resolution time can
+  // decide whether to emit a long bezier (merge-side) or skip in favour of
+  // the natural passthrough+join shape (first-parent in-window).
   interface PendingLine {
     fromHash: string;
     fromRow: number;
     fromCol: number;
     toHash: string;
     color: string;
-    branchTip?: boolean;
+    isFirstParent: boolean;
   }
   const pending: PendingLine[] = [];
 
@@ -105,59 +121,88 @@ export function computeGraphLayout(commits: Commit[]): GraphLayout {
     }
 
     let myCol: number;
-    if (waitingCols.length > 0) {
+    const reusedCol = waitingCols.length > 0;
+    if (reusedCol) {
       myCol = waitingCols[0];
     } else {
       myCol = allocColumn();
     }
     allocColor(myCol);
+    // Snapshot the lane's pre-row provenance: if the column was waiting as
+    // a merge-side parent then the merge bezier handles the visual flow
+    // INTO this commit, so we'd want to suppress the otherwise-natural
+    // vertical passthrough above the node.
+    const priorWasFirstParent = reusedCol ? (columnWasFirstParent[myCol] ?? true) : true;
 
-    // 2. Free the columns that were merging in (we'll draw a line from each
-    //    of them down into myCol at this row).
+    // 2. Connect the active lane into the commit. If the column was reused
+    //    from a previous first-parent waiting hash, draw the vertical
+    //    segment from the previous row down into this commit's centre.
+    //    Skip when the lane was in merge-transit (priorWasFirstParent is
+    //    false): the merge bezier already terminates at this commit, so
+    //    a vertical above the node would create a Y-shape junction.
+    if (reusedCol && row > 0 && priorWasFirstParent) {
+      lines.push({
+        fromRow: row - 1,
+        fromCol: myCol,
+        toRow: row,
+        toCol: myCol,
+        color: columnColor[myCol] ?? palette[0],
+        kind: 'vertical',
+      });
+    }
+
+    // Free the columns that were merging in (small diagonal join from each
+    // of them down into myCol at this row). The kind of that join depends
+    // on why the lane was reserved: first-parent lanes visualise a
+    // "branch-out" terminating into main (dashed); merge-side lanes
+    // visualise a "merge-back" join (solid bezier).
     for (const wc of waitingCols) {
       if (wc !== myCol) {
-        // Line: descendant lane (col=wc) down into our column at this row.
-        // We don't know the descendant's exact row, but the descendant already
-        // emitted a passthrough line ending at row-1, so this segment just
-        // covers the join from (wc, row-1) to (myCol, row).
+        const wasFP = columnWasFirstParent[wc] ?? true;
         lines.push({
           fromRow: row - 1,
           fromCol: wc,
           toRow: row,
           toCol: myCol,
           color: columnColor[wc] ?? columnColor[myCol],
-          branchTip: true,
+          kind: wasFP ? 'branch-out' : 'merge',
         });
         columnPool[wc] = null;
+        columnWasFirstParent[wc] = false;
       }
     }
     columnPool[myCol] = null;
+    columnWasFirstParent[myCol] = false;
 
     nodePositions.set(c.hash, { row, column: myCol });
     nodeColors.set(c.hash, columnColor[myCol]);
 
-    // 3. Reserve columns for parents.
+    // 3. Reserve columns for parents. Track which columns were freshly
+    //    allocated this row so step 4 doesn't emit a bogus stub above them.
+    const justAllocated = new Set<number>();
     if (c.parentHashes.length > 0) {
       // First parent — keep on same lane.
       const firstParent = c.parentHashes[0];
       columnPool[myCol] = firstParent;
+      columnWasFirstParent[myCol] = true;
       pending.push({
         fromHash: c.hash,
         fromRow: row,
         fromCol: myCol,
         toHash: firstParent,
         color: columnColor[myCol],
+        isFirstParent: true,
       });
       // Additional parents — branch off into new/free lanes.
       for (let i = 1; i < c.parentHashes.length; i++) {
         const p = c.parentHashes[i];
-        // If a column is already waiting for this parent we can reuse it
-        // (e.g. an existing lane converges into the same parent).
         let pCol = columnPool.findIndex((x) => x === p);
         if (pCol === -1) {
           pCol = allocColumn();
           columnPool[pCol] = p;
+          justAllocated.add(pCol);
         }
+        columnWasFirstParent[pCol] = false;
         const color = allocColor(pCol);
         pending.push({
           fromHash: c.hash,
@@ -165,45 +210,72 @@ export function computeGraphLayout(commits: Commit[]): GraphLayout {
           fromCol: myCol,
           toHash: p,
           color,
-          branchTip: true,
+          isFirstParent: false,
         });
       }
     }
 
-    // 4. Vertical passthrough lines for any column still waiting.
-    //    A passthrough line goes from the previous row to this row at column c
-    //    if that column is occupied AND its hash is not the current commit
-    //    (because we just freed those above).
+    // 4. Vertical passthrough lines for OTHER waiting columns.
+    //    - col === myCol is already handled in step 2 above.
+    //    - justAllocated columns: introduced THIS row by step 3b for a
+    //      merge-side parent; emitting a passthrough would draw a stub
+    //      above the row where the column was first introduced.
+    //    - merge-transit columns (waiting for a non-first-parent of an
+    //      earlier merge): the long bezier already paints the lane, so a
+    //      vertical passthrough would conflict with the curve. Once the
+    //      target commit is processed, its first-parent assignment flips
+    //      `columnWasFirstParent[col]` back to true and passthroughs
+    //      resume normally for further descendants of that lane.
     for (let col = 0; col < columnPool.length; col++) {
       if (columnPool[col] === null) continue;
-      // skip the lane we just emitted parent line for; it'll be added by
-      // the pending-line resolution.
       if (col === myCol) continue;
+      if (justAllocated.has(col)) continue;
+      if (columnWasFirstParent[col] === false) continue;
       lines.push({
         fromRow: row - 1,
         fromCol: col,
         toRow: row,
         toCol: col,
         color: columnColor[col] ?? palette[0],
+        kind: 'vertical',
       });
     }
   }
 
   // Resolve pending parent lines now that we have all nodePositions.
-  // Parents that are off the loaded window (paginated) are drawn going to
-  // (row=commits.length, col=fromCol) — i.e. straight off the bottom.
+  //
+  // First-parent lines are usually redundant with the natural lane shape
+  // (vertical passthroughs + step-1 join), so we DROP them when the parent
+  // is in-window. We keep them for off-window parents to draw a fading trail
+  // off the bottom of the canvas.
+  //
+  // Merge-side (non-first-parent) lines are kept — they draw the long curve
+  // from the merge commit down into its other parent's lane.
   for (const pl of pending) {
     const target = nodePositions.get(pl.toHash);
-    const toRow = target ? target.row : commits.length;
-    const toCol = target ? target.column : pl.fromCol;
-    lines.push({
-      fromRow: pl.fromRow,
-      fromCol: pl.fromCol,
-      toRow,
-      toCol,
-      color: pl.color,
-      branchTip: pl.branchTip,
-    });
+    if (target) {
+      if (pl.isFirstParent) {
+        // Lane shape already covered by passthroughs + step-1 join.
+        continue;
+      }
+      lines.push({
+        fromRow: pl.fromRow,
+        fromCol: pl.fromCol,
+        toRow: target.row,
+        toCol: target.column,
+        color: pl.color,
+        kind: 'merge',
+      });
+    } else {
+      lines.push({
+        fromRow: pl.fromRow,
+        fromCol: pl.fromCol,
+        toRow: commits.length,
+        toCol: pl.fromCol,
+        color: pl.color,
+        kind: 'vertical',
+      });
+    }
   }
 
   return {

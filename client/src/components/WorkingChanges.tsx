@@ -12,7 +12,9 @@ const STATUS_LABEL: Record<FileStatus['status'], string> = {
   conflicted: '!',
 };
 
-export function WorkingTree(): JSX.Element {
+// Working-tree pane shown inside the bottom-panel "Working Changes" tab.
+// Three columns: unstaged | staged | commit composer.
+export function WorkingChanges(): JSX.Element {
   const status = useApp((s) => s.status);
   const stageFiles = useApp((s) => s.stageFiles);
   const unstageFiles = useApp((s) => s.unstageFiles);
@@ -31,8 +33,7 @@ export function WorkingTree(): JSX.Element {
 
   async function doCommit(): Promise<void> {
     const trimmed = message.trim();
-    if (!trimmed) return;
-    if (staged.length === 0) return;
+    if (!trimmed || staged.length === 0) return;
     await commitFn(trimmed);
     setMessage('');
   }
@@ -51,36 +52,35 @@ export function WorkingTree(): JSX.Element {
   }
 
   return (
-    <div className="working-tree">
-      {/* ----- Unstaged ----- */}
-      <div className="pane">
-        <div className="pane-header">
+    <div className="changes-pane">
+      <div className="changes-col">
+        <div className="changes-head">
           <span>Unstaged</span>
           <span className="count">({unstaged.length + conflicted.length})</span>
           <span className="actions">
-            <button className="btn-text" onClick={() => void stageAll()}>
-              Stage all +
+            <button className="text-btn" onClick={() => void stageAll()}>
+              Stage all
             </button>
             <button
-              className="btn-text warning"
+              className="text-btn warning"
               onClick={async () => {
-                if (window.confirm('Discard ALL unstaged changes? This cannot be undone.')) {
+                if (window.confirm('Discard ALL unstaged changes?')) {
                   await discardFiles(unstaged.map((f) => f.path));
                 }
               }}
             >
-              Discard all
+              Discard
             </button>
           </span>
         </div>
-        <div className="pane-body">
+        <div className="changes-body">
           {conflicted.map((f) => (
             <FileRow
               key={`conflict-${f.path}`}
               file={f}
               actions={
                 <button
-                  className="icon-btn"
+                  className="row-icon-btn"
                   onClick={() => void stageFiles([f.path])}
                   title="Mark resolved"
                 >
@@ -96,14 +96,14 @@ export function WorkingTree(): JSX.Element {
               actions={
                 <>
                   <button
-                    className="icon-btn"
+                    className="row-icon-btn"
                     onClick={() => void stageFiles([f.path])}
                     title="Stage"
                   >
                     +
                   </button>
                   <button
-                    className="icon-btn danger"
+                    className="row-icon-btn danger"
                     onClick={() => void discard(f)}
                     title="Discard"
                   >
@@ -114,32 +114,29 @@ export function WorkingTree(): JSX.Element {
             />
           ))}
           {unstaged.length === 0 && conflicted.length === 0 ? (
-            <div style={{ color: 'var(--fg-muted)', padding: '8px 12px', fontSize: 12 }}>
-              No unstaged changes.
-            </div>
+            <div className="empty-line">No unstaged changes</div>
           ) : null}
         </div>
       </div>
 
-      {/* ----- Staged ----- */}
-      <div className="pane">
-        <div className="pane-header">
+      <div className="changes-col">
+        <div className="changes-head">
           <span>Staged</span>
           <span className="count">({staged.length})</span>
           <span className="actions">
-            <button className="btn-text" onClick={() => void unstageAll()}>
-              Unstage all −
+            <button className="text-btn" onClick={() => void unstageAll()}>
+              Unstage all
             </button>
           </span>
         </div>
-        <div className="pane-body">
+        <div className="changes-body">
           {staged.map((f) => (
             <FileRow
               key={f.path}
               file={f}
               actions={
                 <button
-                  className="icon-btn"
+                  className="row-icon-btn"
                   onClick={() => void unstageFiles([f.path])}
                   title="Unstage"
                 >
@@ -149,35 +146,24 @@ export function WorkingTree(): JSX.Element {
             />
           ))}
           {staged.length === 0 ? (
-            <div style={{ color: 'var(--fg-muted)', padding: '8px 12px', fontSize: 12 }}>
-              No staged changes yet.
-            </div>
+            <div className="empty-line">Nothing staged yet</div>
           ) : null}
         </div>
       </div>
 
-      {/* ----- Commit composer ----- */}
-      <div className="pane">
-        <div className="pane-header">
+      <div className="changes-col">
+        <div className="changes-head">
           <span>Commit</span>
           <span className="actions">
             <button
-              className="btn-text"
+              className="text-btn"
               onClick={() => void stash('save')}
               title="Stash all uncommitted changes"
             >
               Stash
             </button>
             <button
-              className="btn-text"
-              disabled={stashes.length === 0}
-              onClick={() => void stash('apply', { index: 0 })}
-              title="Apply latest stash"
-            >
-              Apply
-            </button>
-            <button
-              className="btn-text"
+              className="text-btn"
               disabled={stashes.length === 0}
               onClick={() => void stash('pop', { index: 0 })}
               title="Pop latest stash"
@@ -186,23 +172,26 @@ export function WorkingTree(): JSX.Element {
             </button>
           </span>
         </div>
-        <div className="commit-section">
+        <div className="commit-composer" style={{ flex: 1, borderTop: 'none', background: 'transparent' }}>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={onCommitKeyDown}
-            placeholder="Commit message…"
+            placeholder="Describe your changes…"
+            rows={3}
           />
-          <div className="button-row">
-            <button
-              className="btn primary"
-              disabled={staged.length === 0 || message.trim() === ''}
-              onClick={() => void doCommit()}
-            >
-              Commit
-            </button>
+          <div className="row">
+            <span className="hint">⌘/Ctrl + Enter</span>
+            <div className="button-group">
+              <button
+                className="btn primary"
+                disabled={staged.length === 0 || message.trim() === ''}
+                onClick={() => void doCommit()}
+              >
+                Commit
+              </button>
+            </div>
           </div>
-          <div className="commit-hint">⌘/Ctrl + Enter to commit</div>
         </div>
       </div>
     </div>
@@ -222,9 +211,7 @@ function FileRow({
       <div className="path" title={file.path}>
         {file.path}
       </div>
-      <div className="actions" style={{ display: 'flex', gap: 4 }}>
-        {actions}
-      </div>
+      <div className="row-actions">{actions}</div>
     </div>
   );
 }

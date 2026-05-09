@@ -152,9 +152,47 @@ app.post(
   }),
 );
 app.post(
+  '/api/cherry-pick',
+  ah(async (req, res) => {
+    const { hash } = req.body as { hash?: string };
+    if (!hash) {
+      res.status(400).json({ error: 'Missing commit hash' });
+      return;
+    }
+    res.json(await ensureGit().cherryPick(hash));
+  }),
+);
+app.post(
+  '/api/revert',
+  ah(async (req, res) => {
+    const { hash } = req.body as { hash?: string };
+    if (!hash) {
+      res.status(400).json({ error: 'Missing commit hash' });
+      return;
+    }
+    res.json(await ensureGit().revert(hash));
+  }),
+);
+app.post(
   '/api/branches/delete',
   ah(async (req, res) => {
     await ensureGit().deleteBranch(req.body.name, !!req.body.force);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/branches/create',
+  ah(async (req, res) => {
+    const { name, from, checkout } = req.body as {
+      name?: string;
+      from?: string;
+      checkout?: boolean;
+    };
+    if (!name || typeof name !== 'string') {
+      res.status(400).json({ error: 'Missing branch name' });
+      return;
+    }
+    await ensureGit().createBranch(name, from, checkout !== false);
     res.json({ ok: true });
   }),
 );

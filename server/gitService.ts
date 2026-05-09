@@ -522,9 +522,60 @@ export class GitService {
     });
   }
 
+  // Cherry-pick a commit onto the current branch. Returns conflict info on
+  // failure so the caller can route the user into the conflict-resolution UI.
+  async cherryPick(hash: string): Promise<{ ok: boolean; conflicts?: string[] }> {
+    return this.mutate('cherryPick', async () => {
+      try {
+        await this.git.raw(['cherry-pick', hash]);
+        return { ok: true };
+      } catch (e) {
+        const status = await this.git.status();
+        if (status.conflicted.length > 0) {
+          return { ok: false, conflicts: status.conflicted };
+        }
+        throw e;
+      }
+    });
+  }
+
+  // Revert a commit by creating a new commit that undoes its changes. We use
+  // --no-edit so the standard "Revert "<subject>"" message is committed
+  // automatically; the user can amend later if they want.
+  async revert(hash: string): Promise<{ ok: boolean; conflicts?: string[] }> {
+    return this.mutate('revert', async () => {
+      try {
+        await this.git.raw(['revert', '--no-edit', hash]);
+        return { ok: true };
+      } catch (e) {
+        const status = await this.git.status();
+        if (status.conflicted.length > 0) {
+          return { ok: false, conflicts: status.conflicted };
+        }
+        throw e;
+      }
+    });
+  }
+
   deleteBranch(name: string, force = false): Promise<void> {
     return this.mutate('deleteBranch', async () => {
       await this.git.raw(['branch', force ? '-D' : '-d', name]);
+    });
+  }
+
+  // Create a branch (and optionally check it out). If `from` is omitted the
+  // branch is created off the current HEAD.
+  createBranch(name: string, from?: string, checkout = true): Promise<void> {
+    return this.mutate('createBranch', async () => {
+      if (checkout) {
+        const args = ['checkout', '-b', name];
+        if (from) args.push(from);
+        await this.git.raw(args);
+      } else {
+        const args = ['branch', name];
+        if (from) args.push(from);
+        await this.git.raw(args);
+      }
     });
   }
 

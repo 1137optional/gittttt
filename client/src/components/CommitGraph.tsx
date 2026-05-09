@@ -3,13 +3,18 @@ import { useApp } from '../store';
 import { computeGraphLayout, colToX, rowToY, type GraphLayout } from '../graph/graphLayout';
 import { ageOpacity, theme } from '../theme';
 import type { Commit } from '@shared/types';
+import { ContextMenu, type MenuItem } from './ContextMenu';
+import { NewBranchModal } from './NewBranchModal';
 
 const ROW_H = theme.graph.rowHeight;
 const COL_W = theme.graph.columnWidth;
-const NODE_R = theme.graph.nodeRadius;
-const HEAD_R = theme.graph.headRadius;
+const NODE_R = theme.graph.nodeRadius;          // 8 → 16px diameter
 const SELECTED_R = theme.graph.selectedRadius;
-const META_GUTTER = 16;
+const NODE_BORDER = theme.graph.nodeBorder;     // 2px white halo
+const HEAD_HALO_R = theme.graph.headHaloRadius; // outer dashed ring
+const LABEL_OFFSET = theme.graph.labelOffsetX;  // 25px → first label
+const META_GUTTER = theme.graph.metaGutter;
+const META_WIDTH = theme.graph.metaWidth;
 
 export function CommitGraph(): JSX.Element {
   const commits = useApp((s) => s.commits);
@@ -17,7 +22,14 @@ export function CommitGraph(): JSX.Element {
   const selectedHash = useApp((s) => s.selectedCommitHash);
   const highlighted = useApp((s) => s.highlightedHashes);
   const repoBranch = useApp((s) => s.repo?.currentBranchName ?? '');
+  const status = useApp((s) => s.status);
   const selectCommit = useApp((s) => s.selectCommit);
+  const checkout = useApp((s) => s.checkout);
+  const merge = useApp((s) => s.merge);
+  const rebase = useApp((s) => s.rebase);
+  const cherryPick = useApp((s) => s.cherryPick);
+  const revert = useApp((s) => s.revert);
+  const pushToast = useApp((s) => s.pushToast);
   const loadMore = useApp((s) => s.loadMoreCommits);
   const loadingMore = useApp((s) => s.loadingMore);
 
@@ -28,7 +40,10 @@ export function CommitGraph(): JSX.Element {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [scrollTop, setScrollTop] = useState(0);
 
-  // Sync canvas size to its panel.
+  // Right-click context menu + "create branch from this commit" modal.
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [branchFrom, setBranchFrom] = useState<string | null>(null);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -40,7 +55,6 @@ export function CommitGraph(): JSX.Element {
     return () => ro.disconnect();
   }, []);
 
-  // Render to canvas — every scroll/resize/layout-change.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -75,58 +89,180 @@ export function CommitGraph(): JSX.Element {
     }
   }
 
-  function onClick(e: React.MouseEvent<HTMLDivElement>): void {
+  // Translate a (clientX, clientY) into the commit row beneath it (or null
+  // if the click was in dead space). Used by both left-click selection and
+  // right-click context menu.
+  function commitAt(clientX: number, clientY: number): Commit | null {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el) return null;
     const rect = el.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top + scrollTop;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top + scrollTop;
     const row = Math.round((y - theme.graph.topPadding) / ROW_H);
-    if (row < 0 || row >= commits.length) return;
+    if (row < 0 || row >= commits.length) return null;
     const c = commits[row];
     const pos = layout.nodePositions.get(c.hash);
-    if (!pos) return;
+    if (!pos) return null;
     const cx = colToX(pos.column);
     const cy = rowToY(pos.row);
     const dx = x - cx;
     const dy = y - cy;
-    if (dx * dx + dy * dy <= (SELECTED_R + 6) ** 2) {
-      void selectCommit(c.hash);
-      return;
+    if (dx * dx + dy * dy <= (SELECTED_R + 8) ** 2) return c;
+    // Clicks anywhere on the row past the graph land on the commit too —
+    // that's the most-discoverable hit area for the right-side metadata.
+    if (x > theme.graph.leftPadding + layout.columnsUsed * COL_W) return c;
+    return null;
+  }
+
+  function onClick(e: React.MouseEvent<HTMLDivElement>): void {
+    const c = commitAt(e.clientX, e.clientY);
+    if (c) void selectCommit(c.hash);
+  }
+
+  // Pre-flight gate for mutations that change the working tree (merge,
+  // rebase, cherry-pick, revert). Mirrors the branch-list pre-flight in the
+  // sidebar so the user gets a consistent warning.
+  function preflight(): boolean {
+    if (!status) return true;
+    if (status.inMerge || status.inRebase) {
+      pushToast('warn', 'Finish or abort the in-progress merge/rebase first.');
+      return false;
     }
-    if (x > theme.graph.leftPadding + layout.columnsUsed * COL_W) {
-      void selectCommit(c.hash);
+    const dirty = status.unstaged.length + status.staged.length;
+    if (dirty > 0) {
+      return window.confirm(
+        `You have ${dirty} uncommitted change${dirty === 1 ? '' : 's'}. Continue anyway?`,
+      );
     }
+    return true;
+  }
+
+  function copy(text: string, label: string): void {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => pushToast('success', `${label} copied`))
+      .catch(() => pushToast('error', 'Could not copy to clipboard'));
+  }
+
+  function onContextMenu(e: React.MouseEvent<HTMLDivElement>): void {
+    const c = commitAt(e.clientX, e.clientY);
+    if (!c) return;
+    e.preventDefault();
+    void selectCommit(c.hash);
+
+    const isHEAD = c.refs.some((r) => r.type === 'head');
+    const current = repoBranch || 'HEAD';
+    const items: MenuItem[] = [
+      {
+        label: 'Checkout this commit (detached)',
+        onClick: () => {
+          if (!preflight()) return;
+          void checkout(c.hash);
+        },
+      },
+      {
+        label: 'Create branch from this commit…',
+        onClick: () => setBranchFrom(c.hash),
+      },
+      { separator: true },
+      {
+        label: `Cherry-pick onto ${current}`,
+        onClick: () => {
+          if (isHEAD) {
+            pushToast('warn', 'That commit is already HEAD.');
+            return;
+          }
+          if (!preflight()) return;
+          void cherryPick(c.hash);
+        },
+      },
+      {
+        label: 'Revert this commit',
+        onClick: () => {
+          if (!preflight()) return;
+          void revert(c.hash);
+        },
+      },
+      { separator: true },
+      {
+        label: `Merge into ${current}`,
+        onClick: () => {
+          if (isHEAD) {
+            pushToast('warn', "Can't merge HEAD into itself.");
+            return;
+          }
+          if (!preflight()) return;
+          void merge(c.hash);
+        },
+      },
+      {
+        label: `Rebase ${current} onto this commit`,
+        onClick: () => {
+          if (isHEAD) {
+            pushToast('warn', 'Already on this commit.');
+            return;
+          }
+          if (!preflight()) return;
+          void rebase(c.hash);
+        },
+      },
+      { separator: true },
+      {
+        label: `Copy hash (${c.shortHash})`,
+        onClick: () => copy(c.hash, 'Hash'),
+      },
+      {
+        label: 'Copy short hash',
+        onClick: () => copy(c.shortHash, 'Short hash'),
+      },
+    ];
+    setMenu({ x: e.clientX, y: e.clientY, items });
   }
 
   if (commits.length === 0) {
-    return <div className="graph-empty">no commits</div>;
+    return <div className="graph-empty">No commits yet</div>;
   }
 
   const totalHeight =
     layout.totalRows * ROW_H + theme.graph.topPadding * 2;
 
+  // Lookup the selected commit by hash for the modal label.
+  const branchFromCommit = branchFrom ? commits.find((c) => c.hash === branchFrom) : null;
+
   return (
-    <div
-      className="graph-wrap"
-      ref={containerRef}
-      onScroll={onScroll}
-      onClick={onClick}
-    >
-      <div style={{ height: totalHeight, position: 'relative' }}>
-        <canvas
-          className="graph-canvas"
-          ref={canvasRef}
-          style={{ position: 'sticky', top: 0, left: 0 }}
-        />
+    <>
+      <div
+        className="graph-wrap"
+        ref={containerRef}
+        onScroll={onScroll}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+      >
+        <div style={{ height: totalHeight, position: 'relative' }}>
+          <canvas
+            className="graph-canvas"
+            ref={canvasRef}
+            style={{ position: 'sticky', top: 0, left: 0 }}
+          />
+        </div>
       </div>
-    </div>
+      {menu ? (
+        <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
+      ) : null}
+      {branchFrom ? (
+        <NewBranchModal
+          from={branchFrom}
+          fromLabel={
+            branchFromCommit
+              ? `${branchFromCommit.shortHash} · ${branchFromCommit.message.split('\n')[0]}`
+              : branchFrom.slice(0, 7)
+          }
+          onClose={() => setBranchFrom(null)}
+        />
+      ) : null}
+    </>
   );
 }
-
-// =============================================================================
-// Drawing
-// =============================================================================
 
 interface DrawArgs {
   width: number;
@@ -140,11 +276,11 @@ interface DrawArgs {
 }
 
 function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
-  // Clear with the panel base color (transparent so the body radial-gradient
-  // shows through in static screenshots).
-  ctx.fillStyle = theme.bg.base;
+  // White surface — graph sits inside a card so we paint the card fill here.
+  ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, a.width, a.height);
 
+  // Faint zebra stripes per row to help the eye track horizontally.
   const firstRow = Math.max(0, Math.floor((a.scrollTop - theme.graph.topPadding) / ROW_H) - 2);
   const lastRow = Math.min(
     a.layout.totalRows - 1,
@@ -152,38 +288,74 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   );
   const yOffset = a.scrollTop;
 
-  // -- Lines (drawn first so nodes sit on top). Lines stay fully opaque to
-  //    keep the time spine readable; only nodes + text fade with age.
+  for (let row = firstRow; row <= lastRow; row++) {
+    if (row % 2 === 1) continue;
+    const y = rowToY(row) - yOffset - ROW_H / 2;
+    ctx.fillStyle = '#FAFBFC';
+    ctx.fillRect(0, y, a.width, ROW_H);
+  }
+
+  // Selected row highlight (full-width pale brand wash).
+  for (let row = firstRow; row <= lastRow; row++) {
+    const c = a.commits[row];
+    if (!c || c.hash !== a.selectedHash) continue;
+    const y = rowToY(row) - yOffset - ROW_H / 2;
+    ctx.fillStyle = 'rgba(55,138,221,0.08)';
+    ctx.fillRect(0, y, a.width, ROW_H);
+  }
+
+  // Lines first (so node markers sit on top). We draw in two passes so dashed
+  // branch-out lines overlay solid lines deterministically; otherwise a long
+  // pending diagonal could print under a passthrough that came after it.
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+
+  type LineEntry = (typeof a.layout.lines)[number];
+  const solid: LineEntry[] = [];
+  const dashed: LineEntry[] = [];
   for (const line of a.layout.lines) {
     if (line.toRow < firstRow || line.fromRow > lastRow) continue;
+    if (line.kind === 'branch-out') dashed.push(line);
+    else solid.push(line);
+  }
+
+  function strokeLine(line: LineEntry): void {
     const x1 = colToX(line.fromCol);
     const y1 = rowToY(line.fromRow) - yOffset;
     const x2 = colToX(line.toCol);
     const y2 = rowToY(line.toRow) - yOffset;
-
     ctx.strokeStyle = line.color;
-    ctx.globalAlpha = 0.85;
     ctx.lineWidth = theme.graph.lineWidth;
     ctx.beginPath();
     if (x1 === x2) {
+      // Vertical lane — straight, no curve.
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
     } else {
+      // Diagonal — smooth bezier S-curve. Control points sit at the
+      // mid-row on each end so the line stays vertical at the endpoints
+      // and arcs across in the middle. Looks the same in solid or dashed.
       const midY = (y1 + y2) / 2;
       ctx.moveTo(x1, y1);
       ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
     }
     ctx.stroke();
   }
+
+  ctx.globalAlpha = 0.95;
+  ctx.setLineDash([]);
+  for (const line of solid) strokeLine(line);
+
+  // Dashed pass: 4px on / 4px off as in the spec. We bump alpha down
+  // slightly so the dashed branch-out lines read as "secondary" relative
+  // to the solid main flow.
+  ctx.setLineDash([4, 4]);
+  ctx.globalAlpha = 0.85;
+  for (const line of dashed) strokeLine(line);
+  ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 
-  // -- Nodes + text per visible row. Each row has its own age-derived alpha.
-  ctx.font = `500 12px ${theme.font.ui}`;
   ctx.textBaseline = 'middle';
-
-  const metaXBase = theme.graph.leftPadding + a.layout.columnsUsed * COL_W + META_GUTTER;
 
   for (let row = firstRow; row <= lastRow; row++) {
     const c = a.commits[row];
@@ -197,76 +369,71 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const alpha = ageOpacity(c.timestamp);
     const isHEAD = c.refs.some((r) => r.type === 'head');
     const isSelected = c.hash === a.selectedHash;
-    const isCurrentBranchTip = c.refs.some(
-      (r) => r.type === 'branch' && r.name === a.currentBranch,
-    );
 
-    // Selected ring (non-faded — selection always reads strong)
-    if (isSelected) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, SELECTED_R + 6, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.18;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      ctx.beginPath();
-      ctx.arc(cx, cy, SELECTED_R + 4, 0, Math.PI * 2);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // Search highlight
+    // Search highlight — outermost ring (well outside the dashed HEAD halo).
     if (a.highlighted.has(c.hash)) {
       ctx.beginPath();
-      ctx.arc(cx, cy, NODE_R + 5, 0, Math.PI * 2);
+      ctx.arc(cx, cy, NODE_R + 8, 0, Math.PI * 2);
       ctx.strokeStyle = theme.accent.warning;
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.6;
       ctx.stroke();
     }
 
-    // HEAD glow — pale green halo, slightly larger node.
-    if (isHEAD) {
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, HEAD_R + 8);
-      grad.addColorStop(0, 'rgba(74, 222, 128, 0.55)');
-      grad.addColorStop(1, 'rgba(74, 222, 128, 0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(cx - HEAD_R - 10, cy - HEAD_R - 10, (HEAD_R + 10) * 2, (HEAD_R + 10) * 2);
-    } else if (isCurrentBranchTip) {
-      // Faint cyan halo for current branch tip.
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, NODE_R + 8);
-      grad.addColorStop(0, 'rgba(56, 189, 248, 0.4)');
-      grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(cx - NODE_R - 10, cy - NODE_R - 10, (NODE_R + 10) * 2, (NODE_R + 10) * 2);
-    }
-
-    // Node body — faded by age.
-    const r = isHEAD ? HEAD_R : c.isMerge ? NODE_R + 1 : NODE_R;
-    ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    if (c.isMerge) {
-      // Hollow ring for merge commits.
+    // Selected — saturated ring just inside the search highlight.
+    if (isSelected) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, SELECTED_R + 5, 0, Math.PI * 2);
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.6;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // HEAD: dashed outer halo at r = NODE_R + 4 (= 12). Dashed style signals
+    // "current active commit" without competing with the solid node fill.
+    if (isHEAD) {
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.arc(cx, cy, HEAD_HALO_R, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Node body — 16px circle with 2px white halo. Merges are a hollow ring
+    // so two-parent commits are still distinguishable at a glance.
+    ctx.globalAlpha = alpha;
+    const r = NODE_R;
+    if (c.isMerge) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
       ctx.stroke();
     } else {
-      ctx.fillStyle = color;
-      ctx.fill();
-    }
-    if (isHEAD) {
-      // Inner mark on HEAD node so it pops on its own.
+      // 2px white halo first, then the colored fill on top, so the halo
+      // reads cleanly against any underlying line or zebra stripe.
       ctx.beginPath();
-      ctx.arc(cx, cy, HEAD_R - 2, 0, Math.PI * 2);
-      ctx.fillStyle = theme.accent.success;
+      ctx.arc(cx, cy, r + NODE_BORDER, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
       ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // Ref pills next to the node.
-    let labelX = cx + r + 8;
+    // Branch tags next to the node — first label sits +25px right of node centre.
+    let labelX = cx + LABEL_OFFSET;
     for (const ref of c.refs) {
       const isHeadPill = ref.type === 'head';
       const isCurrent =
@@ -280,42 +447,51 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
               ? `↗ ${ref.name}`
               : ref.name;
 
-      const pillColor = isHeadPill
-        ? theme.accent.success
-        : isCurrent
-          ? theme.accent.primary
-          : ref.type === 'remote'
-            ? theme.fg.muted
-            : color;
-      const fgColor = isHeadPill || isCurrent ? '#06121f' : pillColor;
-      const bgColor = isHeadPill || isCurrent ? pillColor : 'transparent';
+      const pillColor = isHeadPill ? theme.accent.primary : color;
+      const bg = isCurrent || isHeadPill ? withAlpha(pillColor, 0.14) : '#F5F5F5';
+      const border = isCurrent || isHeadPill ? withAlpha(pillColor, 0.5) : '#E2E4E9';
+      const fg = isCurrent || isHeadPill ? pillColor : theme.fg.secondary;
 
-      ctx.font = `500 10px ${theme.font.code}`;
-      const padX = 6;
+      ctx.font = `500 10.5px ${theme.font.code}`;
+      const padX = 7;
       const w = ctx.measureText(text).width + padX * 2;
-      drawPill(ctx, labelX, cy, w, 16, bgColor, pillColor, fgColor, text);
-      labelX += w + 5;
+      drawPill(ctx, labelX, cy, w, 18, bg, border, fg, text);
+      labelX += w + 6;
     }
 
-    // Subject + meta text.
-    const subjectX = Math.max(metaXBase, labelX + 6);
-    const remaining = a.width - subjectX - 12;
-    if (remaining > 60) {
-      ctx.font = `500 12px ${theme.font.ui}`;
+    const metaCellLeft = a.width - META_WIDTH - 14;
+    const subjectStart =
+      c.refs.length > 0
+        ? labelX + 8
+        : Math.max(
+            theme.graph.leftPadding + a.layout.columnsUsed * COL_W + META_GUTTER,
+            cx + LABEL_OFFSET,
+          );
+    const subjectMax = metaCellLeft - subjectStart - 8;
+
+    if (subjectMax > 40) {
+      ctx.font = `${isSelected ? 600 : 500} 13px ${theme.font.ui}`;
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = isSelected ? theme.accent.primarySoft : theme.fg.primary;
+      // Per spec: the subject label uses the branch colour. Selected commits
+      // bump to the deeper accent so the focused row has extra weight.
+      ctx.fillStyle = isSelected ? theme.accent.primaryDeep : color;
       const subject = c.message.split('\n')[0];
       ctx.textAlign = 'left';
-      ctx.fillText(truncate(ctx, subject, remaining * 0.62), subjectX, cy);
-
-      ctx.font = `400 11px ${theme.font.code}`;
-      ctx.fillStyle = theme.fg.muted;
-      const meta = `${c.shortHash}  ·  ${c.authorName.split(' ')[0]}  ·  ${formatRelative(c.timestamp)}`;
-      ctx.textAlign = 'right';
-      ctx.fillText(truncate(ctx, meta, remaining * 0.38), a.width - 12, cy);
-      ctx.textAlign = 'left';
+      ctx.fillText(truncate(ctx, subject, subjectMax), subjectStart, cy);
       ctx.globalAlpha = 1;
     }
+
+    // Right meta column — author + relative time, kept in muted gray so the
+    // colored subject column reads as the primary signal.
+    ctx.font = `400 11.5px ${theme.font.code}`;
+    ctx.fillStyle = theme.fg.muted;
+    ctx.globalAlpha = Math.min(1, alpha + 0.05);
+    const author = c.authorName.split(' ')[0];
+    const meta = `${c.shortHash}  ${author}  ${formatRelative(c.timestamp)}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(truncate(ctx, meta, META_WIDTH), a.width - 14, cy);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -330,7 +506,7 @@ function drawPill(
   fg: string,
   text: string,
 ): void {
-  const r = 3;
+  const r = 4;
   const y = cy - h / 2;
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -343,17 +519,24 @@ function drawPill(
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
-  if (bg !== 'transparent') {
-    ctx.fillStyle = bg;
-    ctx.fill();
-  }
+  ctx.fillStyle = bg;
+  ctx.fill();
   ctx.strokeStyle = border;
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.fillStyle = fg;
-  ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  ctx.fillText(text, x + 6, cy + 0.5);
+  ctx.fillText(text, x + 7, cy + 0.5);
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const m = hex.match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return hex;
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 0xff;
+  const g = (v >> 8) & 0xff;
+  const b = v & 0xff;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function truncate(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {

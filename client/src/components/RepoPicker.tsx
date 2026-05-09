@@ -15,13 +15,16 @@ export function RepoPicker(): JSX.Element {
 
   return (
     <div className="repo-picker">
-      <div className="glyph">/// gittttt — git timeline</div>
+      <div className="glyph">
+        <div className="brand-logo">G</div>
+        <span>GitFlow</span>
+      </div>
       <div className="card">
-        <h2>open repository</h2>
+        <h2>Open a Git repository</h2>
         <p>
-          The browser can't pick local folders, so paste the absolute path of
-          the repository you want to inspect. The local server will run every
-          Git command there.
+          Browsers can't pick local folders directly — paste the absolute path
+          to the repository you want to work with. The local server will run
+          all Git commands there.
         </p>
         <input
           type="text"
@@ -39,11 +42,12 @@ export function RepoPicker(): JSX.Element {
             onClick={() => void submit()}
             disabled={busy || !path.trim()}
           >
-            {busy ? 'opening…' : 'open'}
+            {busy ? 'Opening…' : 'Open repository'}
           </button>
         </div>
-        <p style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-code)' }}>
-          tip: launch with <code>GITTTTT_REPO=/path</code> to auto-open.
+        <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+          Tip: launch the server with <code>GITTTTT_REPO=/path/to/repo</code> to
+          auto-open on startup.
         </p>
       </div>
     </div>

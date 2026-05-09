@@ -41,6 +41,8 @@ interface AppState {
   isLoading: boolean;        // global blocker for pull/push/sync
   loadingMore: boolean;       // commit pagination in flight
   toasts: Toast[];
+  bottomTab: 'detail' | 'changes';
+  setBottomTab(tab: 'detail' | 'changes'): void;
 
   // actions
   init(): Promise<void>;
@@ -56,9 +58,12 @@ interface AppState {
   sync(): Promise<void>;
 
   checkout(branch: string): Promise<void>;
-  merge(branch: string): Promise<{ ok: boolean; conflicts?: string[] }>;
-  rebase(branch: string): Promise<{ ok: boolean; conflicts?: string[] }>;
+  merge(target: string): Promise<{ ok: boolean; conflicts?: string[] }>;
+  rebase(target: string): Promise<{ ok: boolean; conflicts?: string[] }>;
+  cherryPick(hash: string): Promise<{ ok: boolean; conflicts?: string[] }>;
+  revert(hash: string): Promise<{ ok: boolean; conflicts?: string[] }>;
   deleteBranch(name: string): Promise<void>;
+  createBranch(name: string, opts?: { from?: string; checkout?: boolean }): Promise<void>;
 
   stageFiles(files: string[]): Promise<void>;
   unstageFiles(files: string[]): Promise<void>;
@@ -74,6 +79,12 @@ interface AppState {
 }
 
 let nextToastId = 1;
+
+// Pretty-print a ref string for toast messages. Hashes (40-char hex) are
+// shortened to 7 chars; branch / tag names are left alone.
+function friendlyRef(ref: string): string {
+  return /^[0-9a-f]{40}$/i.test(ref) ? ref.slice(0, 7) : ref;
+}
 
 export const useApp = create<AppState>((set, get) => {
   // ---------------------------------------------------------------------------
@@ -147,6 +158,10 @@ export const useApp = create<AppState>((set, get) => {
     isLoading: false,
     loadingMore: false,
     toasts: [],
+    bottomTab: 'changes',
+    setBottomTab(tab) {
+      set({ bottomTab: tab });
+    },
 
     async init() {
       await wrap(reloadCore);
@@ -184,7 +199,9 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     async selectCommit(hash) {
-      set({ selectedCommitHash: hash, commitDetail: null });
+      // Clicking a commit also flips the bottom panel to the detail tab
+      // — that's where the new info should land.
+      set({ selectedCommitHash: hash, commitDetail: null, bottomTab: hash ? 'detail' : get().bottomTab });
       if (!hash) return;
       await wrap(async () => {
         const detail = await api.getCommitDetail(hash);
@@ -256,10 +273,11 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async merge(branch) {
+    async merge(target) {
       const result = await wrap(async () => {
-        const r = await api.merge(branch);
-        if (r.ok) get().pushToast('success', `Merged ${branch}`);
+        const r = await api.merge(target);
+        const label = friendlyRef(target);
+        if (r.ok) get().pushToast('success', `Merged ${label}`);
         else
           get().pushToast(
             'warn',
@@ -271,14 +289,47 @@ export const useApp = create<AppState>((set, get) => {
       return result ?? { ok: false };
     },
 
-    async rebase(branch) {
+    async rebase(target) {
       const result = await wrap(async () => {
-        const r = await api.rebase(branch);
-        if (r.ok) get().pushToast('success', `Rebased onto ${branch}`);
+        const r = await api.rebase(target);
+        const label = friendlyRef(target);
+        if (r.ok) get().pushToast('success', `Rebased onto ${label}`);
         else
           get().pushToast(
             'warn',
             `Rebase conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+          );
+        return r;
+      });
+      await get().refreshAll();
+      return result ?? { ok: false };
+    },
+
+    async cherryPick(hash) {
+      const result = await wrap(async () => {
+        const r = await api.cherryPick(hash);
+        const label = friendlyRef(hash);
+        if (r.ok) get().pushToast('success', `Cherry-picked ${label}`);
+        else
+          get().pushToast(
+            'warn',
+            `Cherry-pick conflicts in ${r.conflicts?.length ?? 0} file(s)`,
+          );
+        return r;
+      });
+      await get().refreshAll();
+      return result ?? { ok: false };
+    },
+
+    async revert(hash) {
+      const result = await wrap(async () => {
+        const r = await api.revert(hash);
+        const label = friendlyRef(hash);
+        if (r.ok) get().pushToast('success', `Reverted ${label}`);
+        else
+          get().pushToast(
+            'warn',
+            `Revert conflicts in ${r.conflicts?.length ?? 0} file(s)`,
           );
         return r;
       });
@@ -293,6 +344,17 @@ export const useApp = create<AppState>((set, get) => {
       });
       if (ok) {
         get().pushToast('success', `Deleted branch ${name}`);
+        await get().refreshAll();
+      }
+    },
+
+    async createBranch(name, opts = {}) {
+      const ok = await wrap(async () => {
+        await api.createBranch(name, opts);
+        return true;
+      });
+      if (ok) {
+        get().pushToast('success', `Created branch ${name}`);
         await get().refreshAll();
       }
     },
