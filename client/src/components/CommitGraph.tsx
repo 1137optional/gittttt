@@ -20,7 +20,6 @@ export function CommitGraph(): JSX.Element {
   const commits = useApp((s) => s.commits);
   const totalCount = useApp((s) => s.totalCommitCount);
   const selectedHash = useApp((s) => s.selectedCommitHash);
-  const highlighted = useApp((s) => s.highlightedHashes);
   const repoBranch = useApp((s) => s.repo?.currentBranchName ?? '');
   const status = useApp((s) => s.status);
   const selectCommit = useApp((s) => s.selectCommit);
@@ -80,10 +79,9 @@ export function CommitGraph(): JSX.Element {
       layout,
       commits,
       selectedHash,
-      highlighted,
       currentBranch: repoBranch,
     });
-  }, [size, scrollTop, layout, commits, selectedHash, highlighted, repoBranch, themeMode]);
+  }, [size, scrollTop, layout, commits, selectedHash, repoBranch, themeMode]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>): void {
     const el = e.currentTarget;
@@ -299,7 +297,6 @@ interface DrawArgs {
   layout: GraphLayout;
   commits: Commit[];
   selectedHash: string | null;
-  highlighted: Set<string>;
   currentBranch: string;
 }
 
@@ -406,16 +403,7 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const isHEAD = c.refs.some((r) => r.type === 'head');
     const isSelected = c.hash === a.selectedHash;
 
-    // Search highlight — outermost ring (well outside the dashed HEAD halo).
-    if (a.highlighted.has(c.hash)) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, NODE_R + 8, 0, Math.PI * 2);
-      ctx.strokeStyle = theme.accent.warning;
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-    }
-
-    // Selected — saturated ring just inside the search highlight.
+    // Selected — saturated ring outside the dashed HEAD halo.
     if (isSelected) {
       ctx.beginPath();
       ctx.arc(cx, cy, SELECTED_R + 5, 0, Math.PI * 2);
@@ -472,14 +460,10 @@ function drawGraph(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       const isHeadPill = ref.type === 'head';
       const isCurrent =
         ref.type === 'branch' && ref.name === a.currentBranch;
-      const text =
-        ref.type === 'tag'
-          ? `▸ ${ref.name}`
-          : isHeadPill
-            ? 'HEAD'
-            : ref.type === 'remote'
-              ? `↗ ${ref.name}`
-              : ref.name;
+      // Tag and remote prefixes used to be `▸ name` and `↗ name`; the
+      // unicode prefixes were dropped along with the rest of the emoji
+      // sweep — pill background colour now distinguishes ref types.
+      const text = isHeadPill ? 'HEAD' : ref.name;
 
       const pillColor = isHeadPill ? theme.accent.primary : color;
       const softBg = root.getPropertyValue('--soft-gray').trim() || '#F5F5F5';

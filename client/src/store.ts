@@ -32,8 +32,6 @@ interface AppState {
 
   // selection / UI
   selectedCommitHash: string | null;
-  searchQuery: string;
-  highlightedHashes: Set<string>;
   // Which page is shown in the LEFT sidebar.
   //   'branches' — the existing tree (branches / remotes / stash)
   //   'docs'     — Markdown-style doc page explaining the right-click menu
@@ -57,7 +55,6 @@ interface AppState {
 
   loadMoreCommits(): Promise<void>;
   selectCommit(hash: string | null): Promise<void>;
-  setSearchQuery(q: string): Promise<void>;
 
   pull(): Promise<void>;
   push(): Promise<void>;
@@ -179,8 +176,6 @@ export const useApp = create<AppState>((set, get) => {
     totalCommitCount: 0,
     status: null,
     selectedCommitHash: null,
-    searchQuery: '',
-    highlightedHashes: new Set<string>(),
     leftPage: 'branches',
     setLeftPage(page) {
       set({ leftPage: page });
@@ -245,18 +240,6 @@ export const useApp = create<AppState>((set, get) => {
       // gone, so this is just a synchronous setter behind an async signature
       // (kept async to avoid churning the call sites).
       set({ selectedCommitHash: hash });
-    },
-
-    async setSearchQuery(q) {
-      set({ searchQuery: q });
-      if (!q.trim()) {
-        set({ highlightedHashes: new Set() });
-        return;
-      }
-      await wrap(async () => {
-        const hashes = await api.searchCommits(q);
-        set({ highlightedHashes: new Set(hashes) });
-      });
     },
 
     async pull() {

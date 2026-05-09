@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { simpleGit } from 'simple-git';
+import { deleteToken, readToken, writeToken } from './tokenStore.js';
 import type {
   CreateGitHubRepoInput,
   GitHubAuthStatus,
@@ -10,22 +11,39 @@ import type {
 } from '../shared/types.js';
 
 // =============================================================================
-// GitHub integration (delegates to the local `gh` CLI)
+// GitHub integration — talks directly to api.github.com using a Personal
+// Access Token that the user pastes through the web UI. No CLI dependency.
 //
-// Why `gh` instead of OAuth/PAT? It's the only way to talk to GitHub from a
-// purely local desktop tool without storing client secrets or making the user
-// paste a token. Whatever credentials they already have via `gh auth login`
-// just work. If `gh` is missing, every method here returns a clear "install
-// gh" message so the UI can route them to a one-line fix.
+// Why PAT over a full OAuth App / Device Flow?
+//   - Device Flow needs an OAuth App's client_id; we don't have a registered
+//     one for gittttt and "borrowing" e.g. the gh CLI's id is sketchy.
+//   - PAT keeps the trust boundary small: the server stores a bearer token in
+//     a 0600 file the user themselves dropped in, and uses it 1:1 for every
+//     api.github.com call. No client secrets, no callback URLs.
 //
-// All operations are non-mutating to the user's git state EXCEPT clone /
-// create — those write to disk, so they ask the OS for the configured repo
-// directory and create it on demand.
+// Cloning goes through simple-git over HTTPS using the token in the URL
+// (https://x-access-token:<TOKEN>@github.com/owner/repo.git). That works
+// from machines without SSH keys configured for GitHub.
 // =============================================================================
+
+const GH_API = 'https://api.github.com';
+const UA = 'gittttt/0.1';
+const COMMON_HEADERS = {
+  Accept: 'application/vnd.github+json',
+  'X-GitHub-Api-Version': '2022-11-28',
+  'User-Agent': UA,
+};
+
+interface CachedAuth {
+  user: string;
+  avatarUrl: string;
+}
 
 export class GitHubService {
   /** Where freshly-cloned + freshly-created repos land on disk. */
   readonly reposDir: string;
+  /** Last successful /user lookup; cleared on sign-out or token rotation. */
+  private cachedAuth: CachedAuth | null = null;
 
   constructor() {
     this.reposDir = process.env.GITTTTT_REPO_DIR
@@ -34,105 +52,124 @@ export class GitHubService {
   }
 
   // ---------------------------------------------------------------------------
-  // Auth
+  // Token lifecycle (POST /api/github/token, DELETE /api/github/token)
+  // ---------------------------------------------------------------------------
+
+  /** Validate via GET /user and persist on success. Throws on bad token. */
+  async signInWithToken(token: string): Promise<GitHubAuthStatus> {
+    const cleaned = token.trim();
+    if (!cleaned) throw new Error('Empty token.');
+    const me = await this.fetchUser(cleaned);
+    writeToken(cleaned);
+    this.cachedAuth = me;
+    return {
+      authenticated: true,
+      user: me.user,
+      avatarUrl: me.avatarUrl,
+      reposDir: this.reposDir,
+    };
+  }
+
+  signOut(): void {
+    deleteToken();
+    this.cachedAuth = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auth status — fast path uses cached identity; cold-start hits /user once.
   // ---------------------------------------------------------------------------
 
   async getAuthStatus(): Promise<GitHubAuthStatus> {
-    const ghOk = await this.hasGh();
-    if (!ghOk) {
-      return {
-        authenticated: false,
-        error: 'GitHub CLI (`gh`) is not installed. Install it with `brew install gh`, then run `gh auth login`.',
-        reposDir: this.reposDir,
-      };
+    const token = readToken();
+    if (!token) {
+      return { authenticated: false, reposDir: this.reposDir };
     }
-    // `gh auth status` writes to STDERR even on success; ignore exit code,
-    // we only care if a logged-in account is present.
-    const { stdout, stderr, code } = await runCmd('gh', ['auth', 'status', '--hostname', 'github.com']);
-    const text = stdout + '\n' + stderr;
-    if (code !== 0 && !/Logged in to github\.com/.test(text)) {
-      return {
-        authenticated: false,
-        error: 'Not logged in to github.com. Run `gh auth login` in a terminal.',
-        reposDir: this.reposDir,
-      };
+    if (!this.cachedAuth) {
+      try {
+        this.cachedAuth = await this.fetchUser(token);
+      } catch (e) {
+        return {
+          authenticated: false,
+          error: (e as Error).message,
+          reposDir: this.reposDir,
+        };
+      }
     }
-    // The line we want looks like:  ✓ Logged in to github.com account alice (keyring)
-    const m = /account\s+([A-Za-z0-9-]+)/.exec(text);
-    return { authenticated: true, user: m?.[1], reposDir: this.reposDir };
+    return {
+      authenticated: true,
+      user: this.cachedAuth.user,
+      avatarUrl: this.cachedAuth.avatarUrl,
+      reposDir: this.reposDir,
+    };
   }
 
   // ---------------------------------------------------------------------------
-  // Repo listing — `gh repo list` returns the user's own repos. Pulls a
-  // generous limit (200) since we sort + filter on the client.
+  // Repo listing — paginates GET /user/repos until exhausted (capped at 5
+  // pages of 100 == 500 repos, plenty for the picker).
   // ---------------------------------------------------------------------------
 
   async listRepos(): Promise<GitHubRepoSummary[]> {
-    await this.ensureAuthenticated();
-    const { stdout } = await runCmd(
-      'gh',
-      [
-        'repo',
-        'list',
-        '--limit',
-        '200',
-        '--json',
-        'name,nameWithOwner,owner,description,visibility,isFork,isArchived,defaultBranchRef,sshUrl,url,pushedAt',
-      ],
-      { wantOk: true },
-    );
-    interface Raw {
-      name: string;
-      nameWithOwner: string;
-      owner: { login?: string } | null;
-      description: string | null;
-      visibility: string;
-      isFork: boolean;
-      isArchived: boolean;
-      defaultBranchRef: { name?: string } | null;
-      sshUrl: string;
-      url: string;
-      pushedAt: string | null;
-    }
-    let rows: Raw[];
-    try {
-      rows = JSON.parse(stdout) as Raw[];
-    } catch {
-      throw new Error('Could not parse `gh repo list` output as JSON.');
-    }
-
+    const token = await this.requireToken();
     const cloned = scanLocalClones(this.reposDir);
-    const clonedByName = new Map<string, string>(); // basename → fullPath
+    const clonedByName = new Map<string, string>();
     for (const c of cloned) clonedByName.set(c.name.toLowerCase(), c.path);
 
-    return rows
-      .map<GitHubRepoSummary>((r) => ({
-        name: r.name,
-        nameWithOwner: r.nameWithOwner,
-        owner: r.owner?.login ?? r.nameWithOwner.split('/')[0],
-        description: r.description ?? '',
-        visibility: (r.visibility?.toUpperCase() as GitHubRepoSummary['visibility']) ?? 'PUBLIC',
-        isFork: !!r.isFork,
-        isArchived: !!r.isArchived,
-        defaultBranch: r.defaultBranchRef?.name ?? 'main',
-        sshUrl: r.sshUrl,
-        url: r.url,
-        pushedAt: r.pushedAt ? Date.parse(r.pushedAt) : 0,
-        localPath: clonedByName.get(r.name.toLowerCase()) ?? null,
-      }))
-      .sort((a, b) => b.pushedAt - a.pushedAt);
+    interface RawRepo {
+      name: string;
+      full_name: string;
+      owner: { login: string } | null;
+      description: string | null;
+      private: boolean;
+      visibility?: string;
+      fork: boolean;
+      archived: boolean;
+      default_branch: string;
+      ssh_url: string;
+      clone_url: string;
+      html_url: string;
+      pushed_at: string | null;
+    }
+
+    const out: GitHubRepoSummary[] = [];
+    const MAX_PAGES = 5;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const url =
+        `${GH_API}/user/repos?per_page=100&page=${page}` +
+        `&affiliation=owner,collaborator,organization_member&sort=pushed`;
+      const rows = await this.gh<RawRepo[]>(token, 'GET', url);
+      for (const r of rows) {
+        out.push({
+          name: r.name,
+          nameWithOwner: r.full_name,
+          owner: r.owner?.login ?? r.full_name.split('/')[0],
+          description: r.description ?? '',
+          visibility: ((r.visibility?.toUpperCase() as GitHubRepoSummary['visibility']) ??
+            (r.private ? 'PRIVATE' : 'PUBLIC')),
+          isFork: !!r.fork,
+          isArchived: !!r.archived,
+          defaultBranch: r.default_branch || 'main',
+          sshUrl: r.ssh_url,
+          url: r.html_url,
+          pushedAt: r.pushed_at ? Date.parse(r.pushed_at) : 0,
+          localPath: clonedByName.get(r.name.toLowerCase()) ?? null,
+        });
+      }
+      if (rows.length < 100) break;
+    }
+    return out.sort((a, b) => b.pushedAt - a.pushedAt);
   }
 
   // ---------------------------------------------------------------------------
-  // Clone — uses `gh repo clone` so auth (SSH/HTTPS, keyring) works exactly
-  // the way the user already configured it. Idempotent: if the target dir
-  // already exists, returns it without re-cloning.
+  // Clone — token-bearing HTTPS so users without an SSH key still succeed.
+  // Idempotent: if the target dir already has a .git, return the path as-is.
   // ---------------------------------------------------------------------------
 
   async cloneRepo(nameWithOwner: string): Promise<{ path: string; alreadyPresent: boolean }> {
-    await this.ensureAuthenticated();
-    const safeName = basename(nameWithOwner); // strip owner/
-    if (!safeName || safeName.includes('..')) throw new Error(`Invalid repo name: ${nameWithOwner}`);
+    const token = await this.requireToken();
+    if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(nameWithOwner)) {
+      throw new Error(`Invalid repo identifier: ${nameWithOwner}`);
+    }
+    const safeName = basename(nameWithOwner);
     ensureDir(this.reposDir);
     const target = join(this.reposDir, safeName);
     if (existsSync(join(target, '.git'))) {
@@ -141,19 +178,22 @@ export class GitHubService {
     if (existsSync(target)) {
       throw new Error(`Target path exists but is not a Git repo: ${target}`);
     }
-    await runCmd('gh', ['repo', 'clone', nameWithOwner, target], { wantOk: true });
+    const url = tokenisedHttpsUrl(token, nameWithOwner);
+    try {
+      await simpleGit().clone(url, target);
+    } catch (e) {
+      throw new Error(`git clone failed: ${redactToken((e as Error).message, token)}`);
+    }
     return { path: target, alreadyPresent: false };
   }
 
   // ---------------------------------------------------------------------------
-  // Create — runs `gh repo create` with --clone so we get a working tree on
-  // disk in one shot. Always private/public is required by gh; we map our
-  // boolean to the right flag. If `addReadme` is true we also pass --add-readme
-  // so there's an initial commit (otherwise the clone would be empty).
+  // Create — POST /user/repos, then clone the resulting repo locally so the
+  // caller can immediately attach it like any other.
   // ---------------------------------------------------------------------------
 
   async createRepo(input: CreateGitHubRepoInput): Promise<{ path: string; nameWithOwner: string }> {
-    await this.ensureAuthenticated();
+    const token = await this.requireToken();
     if (!/^[A-Za-z0-9._-]+$/.test(input.name)) {
       throw new Error('Repo name may only contain letters, digits, dot, dash, underscore.');
     }
@@ -162,38 +202,34 @@ export class GitHubService {
     if (existsSync(target)) {
       throw new Error(`A folder named "${input.name}" already exists in ${this.reposDir}.`);
     }
-    const args = [
-      'repo',
-      'create',
-      input.name,
-      input.isPrivate ? '--private' : '--public',
-      '--clone',
-    ];
-    if (input.description) args.push('--description', input.description);
-    if (input.addReadme) args.push('--add-readme');
 
-    // `gh repo create … --clone` writes the clone into CWD, so run it from
-    // inside the repos dir.
-    await runCmd('gh', args, { cwd: this.reposDir, wantOk: true });
-
-    // Resolve the resulting nameWithOwner via `gh repo view` (we need the
-    // owner login since the user may belong to multiple accounts).
-    const { stdout } = await runCmd('gh', ['repo', 'view', input.name, '--json', 'nameWithOwner'], {
-      cwd: target,
-      wantOk: true,
-    });
-    let nameWithOwner = '';
-    try {
-      const parsed = JSON.parse(stdout) as { nameWithOwner?: string };
-      nameWithOwner = parsed.nameWithOwner ?? input.name;
-    } catch {
-      nameWithOwner = input.name;
+    interface CreatedRepo {
+      full_name: string;
+      clone_url: string;
     }
-    return { path: target, nameWithOwner };
+    const body = {
+      name: input.name,
+      description: input.description ?? '',
+      private: input.isPrivate,
+      auto_init: !!input.addReadme,
+    };
+    const created = await this.gh<CreatedRepo>(token, 'POST', `${GH_API}/user/repos`, body);
+
+    // If the repo was created without auto_init, GitHub returns an empty
+    // repo and `git clone` will warn ("you appear to have cloned an empty
+    // repository"). That's fine — simple-git treats it as success.
+    const url = tokenisedHttpsUrl(token, created.full_name);
+    try {
+      await simpleGit().clone(url, target);
+    } catch (e) {
+      throw new Error(`Repo created but local clone failed: ${redactToken((e as Error).message, token)}`);
+    }
+    return { path: target, nameWithOwner: created.full_name };
   }
 
   // ---------------------------------------------------------------------------
-  // Local repo store — a flat list of every repo under `reposDir`.
+  // Local repo store — every checkout under reposDir, plus the active repo
+  // pinned to the top if it lives outside that dir.
   // ---------------------------------------------------------------------------
 
   listLocalRepos(currentRepoPath: string | null): LocalRepoSummary[] {
@@ -211,8 +247,6 @@ export class GitHubService {
         isCurrent: currentRepoPath === c.path,
       });
     }
-    // If the active repo isn't under reposDir (e.g. user opened a path
-    // manually), surface it on top so they know where they are.
     if (currentRepoPath && !seen.has(currentRepoPath)) {
       out.unshift({
         name: basename(currentRepoPath),
@@ -225,17 +259,65 @@ export class GitHubService {
   }
 
   // ---------------------------------------------------------------------------
-  // helpers
+  // Internal HTTP helpers
   // ---------------------------------------------------------------------------
 
-  private async ensureAuthenticated(): Promise<void> {
-    const auth = await this.getAuthStatus();
-    if (!auth.authenticated) throw new Error(auth.error ?? 'Not authenticated with GitHub.');
+  private async requireToken(): Promise<string> {
+    const token = readToken();
+    if (!token) throw new Error('Not signed in to GitHub. Add a Personal Access Token first.');
+    return token;
   }
 
-  private async hasGh(): Promise<boolean> {
-    const { code } = await runCmd('gh', ['--version']);
-    return code === 0;
+  private async fetchUser(token: string): Promise<CachedAuth> {
+    interface RawUser {
+      login: string;
+      avatar_url: string;
+    }
+    const me = await this.gh<RawUser>(token, 'GET', `${GH_API}/user`);
+    return { user: me.login, avatarUrl: me.avatar_url };
+  }
+
+  /** Single fetch wrapper that handles auth headers + JSON + GitHub errors. */
+  private async gh<T>(token: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<T> {
+    const init: RequestInit = {
+      method,
+      headers: {
+        ...COMMON_HEADERS,
+        Authorization: `Bearer ${token}`,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    };
+    let resp: Response;
+    try {
+      resp = await fetch(url, init);
+    } catch (e) {
+      throw new Error(`GitHub network error: ${(e as Error).message}`);
+    }
+    if (!resp.ok) {
+      // Best-effort: surface GitHub's own JSON {message,errors} shape.
+      let detail = `${resp.status} ${resp.statusText}`;
+      try {
+        const text = await resp.text();
+        if (text) {
+          try {
+            const j = JSON.parse(text) as { message?: string; errors?: Array<{ message?: string }> };
+            const extra = j.errors?.map((x) => x.message).filter(Boolean).join('; ');
+            detail = j.message ? (extra ? `${j.message} — ${extra}` : j.message) : detail;
+          } catch {
+            detail = `${detail} ${text.slice(0, 200)}`;
+          }
+        }
+      } catch {
+        /* ignore — fall back to status line */
+      }
+      // If the token went bad, drop the cached identity so the next /auth
+      // call re-validates instead of lying to the UI.
+      if (resp.status === 401 || resp.status === 403) this.cachedAuth = null;
+      throw new Error(`GitHub API ${method} ${pathOnly(url)}: ${detail}`);
+    }
+    if (resp.status === 204) return undefined as unknown as T;
+    return (await resp.json()) as T;
   }
 }
 
@@ -243,55 +325,25 @@ export class GitHubService {
 // Free helpers
 // =============================================================================
 
-interface CmdResult {
-  stdout: string;
-  stderr: string;
-  code: number | null;
-}
-
-interface RunOpts {
-  cwd?: string;
-  /** When true, throw on non-zero exit (with stderr in the message). */
-  wantOk?: boolean;
-}
-
-// Spawn a child process and collect its full stdio. We spawn instead of
-// `execFile` so very large `gh repo list` outputs (hundreds of repos) don't
-// trip the default ~1MB exec buffer. ENOENT is converted into a non-throwing
-// `code: -1` so the auth check can detect "gh missing" without try/catch.
-function runCmd(cmd: string, args: string[], opts: RunOpts = {}): Promise<CmdResult> {
-  return new Promise<CmdResult>((resolveP, rejectP) => {
-    const child = spawn(cmd, args, {
-      cwd: opts.cwd,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (b: Buffer) => {
-      stdout += b.toString('utf8');
-    });
-    child.stderr.on('data', (b: Buffer) => {
-      stderr += b.toString('utf8');
-    });
-    child.on('error', () => {
-      // Most likely ENOENT (gh not on PATH). Surface as code: -1 so the auth
-      // check can format a friendly "install gh" message without try/catch.
-      resolveP({ stdout, stderr, code: -1 });
-    });
-    child.on('close', (code) => {
-      if (opts.wantOk && code !== 0) {
-        const msg = stderr.trim() || stdout.trim() || `exit ${code}`;
-        rejectP(new Error(`\`${cmd} ${args.join(' ')}\` failed: ${msg}`));
-        return;
-      }
-      resolveP({ stdout, stderr, code });
-    });
-  });
-}
-
 function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
+}
+
+function pathOnly(url: string): string {
+  try {
+    return new URL(url).pathname + new URL(url).search;
+  } catch {
+    return url;
+  }
+}
+
+function tokenisedHttpsUrl(token: string, nameWithOwner: string): string {
+  return `https://x-access-token:${encodeURIComponent(token)}@github.com/${nameWithOwner}.git`;
+}
+
+function redactToken(msg: string, token: string): string {
+  if (!token) return msg;
+  return msg.split(token).join('***');
 }
 
 interface LocalClone {

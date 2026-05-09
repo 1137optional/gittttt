@@ -236,46 +236,33 @@ code,
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
-  transition: background var(--transition);
-}
-.brand:hover {
-  background: var(--soft-gray);
-}
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #5aa0e5 0%, #378add 60%, #1f6fbf 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-family: var(--font-ui);
-  font-weight: 700;
-  font-size: 20px;
-  letter-spacing: -0.02em;
-  box-shadow: 0 2px 6px rgba(55, 138, 221, 0.35);
-}
-.brand-text {
+/* Topnav brand: text-only, doubles as the click target for the repo
+   switcher (the standalone "G" mark was removed). */
+.topnav-brand {
   display: flex;
   flex-direction: column;
-  line-height: 1.1;
+  align-items: flex-start;
+  gap: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+  line-height: 1.15;
+  transition: background var(--transition);
 }
-.brand-text .title {
-  font-size: 16px;
+.topnav-brand:hover {
+  background: var(--soft-gray);
+}
+.topnav-brand .title {
+  font-size: 15px;
   font-weight: 600;
   color: var(--fg-primary);
   letter-spacing: -0.01em;
 }
-.brand-text .subtitle {
-  font-size: 12px;
+.topnav-brand .subtitle {
+  font-size: 11.5px;
   color: var(--fg-muted);
   font-family: var(--font-code);
   margin-top: 2px;
@@ -299,7 +286,12 @@ code,
 .topnav-action:hover {
   background: var(--soft-gray);
   color: var(--fg-primary);
-  border-color: var(--border-strong);
+}
+.topnav-action.icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
 }
 .topnav-action[disabled] {
   opacity: 0.5;
@@ -312,23 +304,6 @@ code,
 }
 .topnav-action.primary:hover {
   background: var(--brand-deep);
-}
-
-/* search modal-like overlay (anchored under the search button) */
-.search-pop {
-  position: absolute;
-  top: calc(var(--top-h) - 8px);
-  right: 22px;
-  width: 360px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
-  z-index: 200;
-}
-.search-pop input {
-  width: 100%;
 }
 
 /* =============================================================================
@@ -921,8 +896,9 @@ code,
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  font-size: 12px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
@@ -1023,21 +999,6 @@ code,
   overflow-y: auto;
   background: var(--page);
 }
-.repo-picker .glyph {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: 600;
-  font-size: 18px;
-  color: var(--fg-primary);
-  flex: 0 0 auto;
-}
-.repo-picker .glyph .brand-logo {
-  width: 36px;
-  height: 36px;
-  font-size: 18px;
-}
-
 .picker-grid {
   display: flex;
   flex-direction: column;
@@ -1063,12 +1024,19 @@ code,
   align-items: flex-start;
   gap: 12px;
 }
+.picker-head-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .picker-card-head h2 {
   margin: 0;
   font-size: 14.5px;
   font-weight: 600;
   color: var(--fg-primary);
   letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .picker-card-head p,
 .picker-card-sub {
@@ -1150,8 +1118,12 @@ code,
   line-height: 1.55;
 }
 .picker-auth-help p {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   color: var(--fg-secondary);
+}
+.picker-auth-blurb {
+  font-size: 11.5px;
+  color: var(--fg-muted) !important;
 }
 .picker-auth-help ol {
   margin: 0;
@@ -1160,7 +1132,8 @@ code,
 .picker-auth-help li {
   margin-bottom: 4px;
 }
-.picker-auth-help code {
+.picker-auth-help code,
+.modal code {
   font-family: var(--font-code);
   font-size: 11px;
   background: var(--bg);

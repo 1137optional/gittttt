@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store';
+import { Icon } from './Icon';
 import type { FileStatus } from '@shared/types';
 
 const STATUS_LABEL: Record<FileStatus['status'], string> = {
@@ -85,8 +86,9 @@ export function WorkingChanges(): JSX.Element {
                   className="row-icon-btn"
                   onClick={() => void stageFiles([f.path])}
                   title="Mark resolved"
+                  aria-label="Mark resolved"
                 >
-                  ✓
+                  <Icon name="check" size={14} />
                 </button>
               }
             />
@@ -101,15 +103,17 @@ export function WorkingChanges(): JSX.Element {
                     className="row-icon-btn"
                     onClick={() => void stageFiles([f.path])}
                     title="Stage"
+                    aria-label="Stage"
                   >
-                    +
+                    <Icon name="plus" size={14} />
                   </button>
                   <button
                     className="row-icon-btn danger"
                     onClick={() => void discard(f)}
                     title="Discard"
+                    aria-label="Discard"
                   >
-                    ⌫
+                    <Icon name="trash" size={14} />
                   </button>
                 </>
               }
@@ -141,8 +145,9 @@ export function WorkingChanges(): JSX.Element {
                   className="row-icon-btn"
                   onClick={() => void unstageFiles([f.path])}
                   title="Unstage"
+                  aria-label="Unstage"
                 >
-                  −
+                  <Icon name="minus" size={14} />
                 </button>
               }
             />

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../store';
 import { hashIndex, theme } from '../theme';
 import { ContextMenu, type MenuItem } from './ContextMenu';
+import { Icon } from './Icon';
 import { LeftDocs } from './LeftDocs';
 import type { Branch } from '@shared/types';
 // Note: contributor / commit / branch / tag stats used to live in this
@@ -140,7 +141,7 @@ export function Sidebar(): JSX.Element {
               title={b.fullName}
             >
               <span className="branch-icon" style={{ color: branchColor(b.name) }}>
-                ⎇
+                <Icon name="branch" size={15} />
               </span>
               <div className="branch-meta">
                 <span className="branch-name">{b.name}</span>
@@ -158,8 +159,9 @@ export function Sidebar(): JSX.Element {
                   e.stopPropagation();
                   showBranchMenu(e, b);
                 }}
+                title="More actions"
               >
-                ⋯
+                <Icon name="more" size={14} />
               </span>
             </div>
           ))}
@@ -180,7 +182,7 @@ export function Sidebar(): JSX.Element {
                 style={{ paddingLeft: 10 }}
               >
                 <span className="branch-icon" style={{ color: branchColor(b.name), opacity: 0.7 }}>
-                  ⎇
+                  <Icon name="branch" size={15} />
                 </span>
                 <div className="branch-meta">
                   <span className="branch-name" style={{ color: 'var(--fg-secondary)' }}>
@@ -226,7 +228,7 @@ export function Sidebar(): JSX.Element {
                 }}
               >
                 <span className="branch-icon" style={{ color: 'var(--fg-muted)' }}>
-                  ☁
+                  <Icon name="cloud" size={15} />
                 </span>
                 <div className="branch-meta">
                   <span className="branch-name">stash@{`{${s.index}}`}</span>

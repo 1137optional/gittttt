@@ -125,14 +125,6 @@ app.get(
 
 app.get('/api/status', ah(async (_req, res) => res.json(await ensureGit().getWorkingTreeStatus())));
 
-app.get(
-  '/api/search',
-  ah(async (req, res) => {
-    const q = String(req.query.q ?? '');
-    res.json(await ensureGit().searchCommits(q));
-  }),
-);
-
 // -----------------------------------------------------------------------------
 // Mutations
 // -----------------------------------------------------------------------------
@@ -339,14 +331,37 @@ app.post(
 );
 
 // -----------------------------------------------------------------------------
-// GitHub integration (delegates to the local `gh` CLI)
-//   GET  /api/github/auth     — auth status + configured repos dir
-//   GET  /api/github/repos    — list user's GitHub repos
-//   POST /api/github/clone    — clone {nameWithOwner}, then open it
-//   POST /api/github/create   — create+clone {name,description,...}, open it
-//   GET  /api/local-repos     — list local clones in the repos dir + active repo
+// GitHub integration (in-app PAT — no CLI dependency)
+//   GET    /api/github/auth   — auth status + configured repos dir
+//   POST   /api/github/token  — { token } : validate + persist
+//   DELETE /api/github/token  — sign out (delete stored token)
+//   GET    /api/github/repos  — list user's GitHub repos
+//   POST   /api/github/clone  — clone {nameWithOwner}, then open it
+//   POST   /api/github/create — create+clone {name,description,...}, open it
+//   GET    /api/local-repos   — list local clones in the repos dir + active repo
 // -----------------------------------------------------------------------------
 app.get('/api/github/auth', ah(async (_req, res) => res.json(await github.getAuthStatus())));
+
+app.post(
+  '/api/github/token',
+  ah(async (req, res) => {
+    const { token } = req.body as { token?: string };
+    if (!token) {
+      res.status(400).json({ error: 'token is required' });
+      return;
+    }
+    res.json(await github.signInWithToken(token));
+  }),
+);
+
+app.delete(
+  '/api/github/token',
+  ah(async (_req, res) => {
+    github.signOut();
+    res.json({ ok: true });
+  }),
+);
+
 app.get('/api/github/repos', ah(async (_req, res) => res.json(await github.listRepos())));
 
 app.post(

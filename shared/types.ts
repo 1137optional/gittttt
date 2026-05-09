@@ -116,14 +116,16 @@ export type StashAction = 'save' | 'apply' | 'pop' | 'drop';
 // GitHub integration (drives /api/github/* and /api/local-repos)
 // =============================================================================
 
-/** Auth status returned by the `gh` CLI (`gh auth status`). */
+/** Auth status — driven by an in-app Personal Access Token saved to
+ *  ~/.gittttt/token. No `gh` CLI is involved. */
 export interface GitHubAuthStatus {
-  /** True iff `gh` is installed AND a logged-in account exists for github.com. */
+  /** True iff a token is on disk AND it validated against GET /user. */
   authenticated: boolean;
   /** Logged-in handle, when known. */
   user?: string;
-  /** Filled when `authenticated === false` to give the UI a printable reason
-   *  (e.g. "gh not installed"). */
+  /** Avatar URL of the logged-in user, when known. */
+  avatarUrl?: string;
+  /** When `authenticated === false`, a printable reason for the UI. */
   error?: string;
   /** Where the server will clone repos to (`~/gittttt-repos` by default). */
   reposDir: string;

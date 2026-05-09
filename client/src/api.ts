@@ -16,7 +16,7 @@ import type {
 //   - parses JSON responses,
 //   - converts non-2xx responses into thrown Error objects with the server message.
 async function http<T>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -56,8 +56,6 @@ export const api = {
   getCommitsRange: (skip: number, limit: number): Promise<Commit[]> =>
     http('GET', `/commits?skip=${skip}&limit=${limit}`),
   getStatus: (): Promise<WorkingTreeStatus> => http('GET', '/status'),
-  searchCommits: (q: string): Promise<string[]> =>
-    http('GET', `/search?q=${encodeURIComponent(q)}`),
 
   // mutations
   pushTo: (body: { localBranch: string; remoteRef: string }) =>
@@ -95,8 +93,11 @@ export const api = {
   completeMerge: () => http<{ ok: true }>('POST', '/merge/complete'),
   abortMerge: () => http<{ ok: true }>('POST', '/merge/abort'),
 
-  // GitHub integration (delegates to the local `gh` CLI on the server).
+  // GitHub integration (in-app PAT, no CLI dependency).
   githubAuth: (): Promise<GitHubAuthStatus> => http('GET', '/github/auth'),
+  githubSignIn: (token: string): Promise<GitHubAuthStatus> =>
+    http('POST', '/github/token', { token }),
+  githubSignOut: () => http<{ ok: true }>('DELETE', '/github/token'),
   githubRepos: (): Promise<GitHubRepoSummary[]> => http('GET', '/github/repos'),
   githubClone: (nameWithOwner: string): Promise<{ ok: true; alreadyPresent: boolean; repo: RepoInfo }> =>
     http('POST', '/github/clone', { nameWithOwner }),
