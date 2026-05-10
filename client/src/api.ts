@@ -12,6 +12,7 @@ import type {
   FsBrowseResult,
   GitHubAuthStatus,
   GitHubRepoSummary,
+  GuardianStatus,
   HttpRequestArgs,
   HttpRequestResult,
   LocalRepoSummary,
@@ -26,6 +27,9 @@ import type {
   Tag,
   TerminalRunRequest,
   TerminalRunResult,
+  VaultDoc,
+  VaultDocSummary,
+  VaultDocType,
   WorkingTreeStatus,
 } from '@shared/types';
 
@@ -199,6 +203,37 @@ export const api = {
     const tail = qs.toString();
     return http('GET', `/fs/browse${tail ? `?${tail}` : ''}`);
   },
+
+  // Guardian — self-protection unlock.
+  guardianStatus: (): Promise<GuardianStatus> => http('GET', '/guardian/status'),
+  guardianUnlock: (): Promise<{ token: string; ttlMs: number }> => http('POST', '/guardian/unlock'),
+  guardianRevoke: (): Promise<{ ok: true }> => http('POST', '/guardian/revoke'),
+
+  // Vault — structured project docs (user-only deletable).
+  listVault: (opts?: { projectRef?: string; type?: VaultDocType }): Promise<{ items: VaultDocSummary[] }> => {
+    const qs = new URLSearchParams();
+    if (opts?.projectRef) qs.set('projectRef', opts.projectRef);
+    if (opts?.type) qs.set('type', opts.type);
+    const tail = qs.toString();
+    return http('GET', `/vault${tail ? `?${tail}` : ''}`);
+  },
+  getVaultDoc: (id: string): Promise<VaultDoc> => http('GET', `/vault/${id}`),
+  createVaultDoc: (body: {
+    projectRef?: string | null;
+    type: VaultDocType;
+    title: string;
+    content: string;
+    author?: 'soul' | 'user';
+    tags?: string[];
+  }): Promise<VaultDoc> => http('POST', '/vault', body),
+  updateVaultDoc: (id: string, body: { content?: string; title?: string; mode?: 'replace' | 'append'; tags?: string[] }): Promise<VaultDoc> =>
+    http('PUT', `/vault/${id}`, body),
+  deleteVaultDoc: (id: string, unlockToken: string): Promise<{ ok: true; removed: boolean }> =>
+    http('DELETE', `/vault/${id}`, { unlockToken }),
+
+  // Daily report.
+  generateDailyReport: (): Promise<VaultDoc> => http('POST', '/daily-report/generate'),
+  getLatestDailyReport: (): Promise<VaultDoc | null> => http('GET', '/daily-report/latest'),
 };
 
 // SSE subscription. Returns an `unsubscribe` function.

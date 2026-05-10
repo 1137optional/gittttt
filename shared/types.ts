@@ -322,7 +322,10 @@ export type ToolName =
   | 'browserGetContent'
   | 'readMemory'
   | 'writeMemory'
-  | 'appendMemory';
+  | 'appendMemory'
+  | 'vaultCreate'
+  | 'vaultAppend'
+  | 'vaultList';
 
 export interface ToolDef {
   name: ToolName;
@@ -538,4 +541,59 @@ export interface ProjectMemorySummary {
   updatedAt: string;
   /** First non-empty line, capped — for the list view. */
   excerpt: string;
+}
+
+// =============================================================================
+// Vault — structured project documentation (survives project deletion;
+// user-only deletable). Lives in ~/.gittttt/vault/*.json.
+// =============================================================================
+
+export type VaultDocType =
+  | 'overview'
+  | 'decision'
+  | 'retrospective'
+  | 'gotcha'
+  | 'note'
+  | 'daily_report';
+
+export interface VaultDoc {
+  id: string;
+  projectRef: string | null;
+  type: VaultDocType;
+  title: string;
+  content: string;
+  author: 'soul' | 'user';
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VaultDocSummary {
+  id: string;
+  projectRef: string | null;
+  type: VaultDocType;
+  title: string;
+  author: 'soul' | 'user';
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+  excerpt: string;
+}
+
+// =============================================================================
+// Guardian — self-protection status exposed to the UI.
+// =============================================================================
+export interface GuardianStatus {
+  locked: boolean;
+  expiresIn?: number;
+}
+
+// =============================================================================
+// Pet / Soul state — drives the companion widget's animation state.
+// =============================================================================
+export type PetMood = 'idle' | 'thinking' | 'working' | 'happy' | 'worried' | 'sleepy';
+
+export interface PetState {
+  mood: PetMood;
+  message?: string;
 }

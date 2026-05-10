@@ -4,10 +4,11 @@ import { EmbeddedBrowser } from './EmbeddedBrowser';
 import { MindMapView } from './MindMapView';
 import { AIAgentPanel } from './AIAgentPanel';
 import { SkillsPanel } from '../SkillsPanel';
+import { PetWidget } from '../PetWidget';
 import { Icon } from '../Icon';
 import { useSplitter } from '../Splitter';
 import { api } from '../../api';
-import type { Skill } from '@shared/types';
+import type { PetMood, Skill } from '@shared/types';
 import { BUILTIN_SKILLS } from '../../skills/registry';
 
 // =============================================================================
@@ -62,6 +63,7 @@ export function DebugLayout(): JSX.Element {
   const [url, setUrl] = useState<string>(() => readUrl());
   const [skills, setSkills] = useState<Skill[]>(BUILTIN_SKILLS);
   const [showSkills, setShowSkills] = useState(false);
+  const [petMood, setPetMood] = useState<PetMood>('idle');
   // Left-pane view: embedded browser (default) vs. radial mind-map of the
   // project file tree. We KEEP BOTH MOUNTED and just hide the inactive
   // one — that way the iframe doesn't reload on every toggle and the
@@ -173,6 +175,7 @@ export function DebugLayout(): JSX.Element {
           <AIAgentPanel
             skills={skills}
             onOpenSkills={() => setShowSkills(true)}
+            onMoodChange={setPetMood}
           />
           {showSkills ? (
             <SkillsPanel
@@ -183,6 +186,7 @@ export function DebugLayout(): JSX.Element {
           ) : null}
         </div>
       </div>
+      <PetWidget mood={petMood} onChatOpen={() => {/* 可以后续加焦点跳转 */}} />
     </div>
   );
 }

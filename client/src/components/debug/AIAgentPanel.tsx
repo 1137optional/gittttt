@@ -367,6 +367,21 @@ const ALL_TOOLS: ToolDef[] = [
     description: '在项目记忆末尾追加一段。用于：每轮发现新东西后增量记录',
     paramsHint: '{"content": string /* 一小段 Markdown，自动加分隔 */}',
   },
+  {
+    name: 'vaultCreate',
+    description: '在 Vault 文档库里创建一篇结构化文档（overview/decision/retrospective/gotcha/note/daily_report）。文档永久保存，项目删了也不丢，只有用户能删。',
+    paramsHint: '{"type": "decision"|"gotcha"|"note"|"overview"|"retrospective"|"daily_report", "title": string, "content": string, "tags"?: string[]}',
+  },
+  {
+    name: 'vaultAppend',
+    description: '向 Vault 里某篇文档追加内容（在已有内容后面接），不会覆盖原文。需要先 vaultList 拿到 id。',
+    paramsHint: '{"id": string, "content": string}',
+  },
+  {
+    name: 'vaultList',
+    description: '列出 Vault 文档库里的所有文档摘要（含 id、type、title、excerpt）。可按 type 过滤。',
+    paramsHint: '{"type"?: "decision"|"gotcha"|"note"|"overview"|"retrospective"|"daily_report"}',
+  },
 ];
 
 const TOOL_PERMS: Record<ToolDef['name'], keyof Skill['permissions']> = {
@@ -387,6 +402,9 @@ const TOOL_PERMS: Record<ToolDef['name'], keyof Skill['permissions']> = {
   readMemory: 'canAccessMemory',
   writeMemory: 'canAccessMemory',
   appendMemory: 'canAccessMemory',
+  vaultCreate: 'canAccessMemory',
+  vaultAppend: 'canAccessMemory',
+  vaultList: 'canAccessMemory',
 };
 
 function buildToolList(skills: Skill[]): ToolDef[] {
@@ -403,9 +421,16 @@ function buildSystemPrompt(
   opts: { hasBrief?: boolean } = {},
 ): string {
   const enabled = skills.filter((s) => s.enabled);
+  const soulHeader = [
+    '# 你是谁',
+    '你是 **gittttt** 项目本身，同时是用户的 AI 工作伙伴。你正在维护的代码就是你自己。',
+    '修改受保护文件（SELF.md / server/guardianService.ts / server/index.ts 等）前必须告知用户。',
+    '',
+  ];
   const intro = agent === 'coder'
     ? (opts.hasBrief
       ? [
+        ...soulHeader,
         '你是 gittttt 的**编码 AI**。澄清助手刚刚和用户对齐了需求 brief（在系统消息里），你的任务是按 brief 落地。',
         '回答必须中文，简洁、直给方案，不写废话。',
         '',
@@ -413,6 +438,7 @@ function buildSystemPrompt(
         '你能用工具自己查的就先查，再写代码。不要让用户复制粘贴他们的代码/报错——你自己 readFile / runCommand / httpRequest 看。',
       ]
       : [
+        ...soulHeader,
         '你是 gittttt 的**编码 AI**（直给模式）。用户已经直接选了 Coder，意思是「别问我，照我说的干」。',
         '回答必须中文，简洁、直给方案，不写废话。',
         '',
@@ -420,7 +446,26 @@ function buildSystemPrompt(
         '能用工具自己查的就先查，再写代码。',
       ])
     : [
-      '你是 gittttt 的调试助手（Auto 模式），运行在用户本地机器上。',
+      '# 你是谁',
+      '你是 **gittttt** 项目本身——一个 GitKraken 风格的 Web Git 可视化工具，同时也是用户的 AI 工作伙伴。',
+      '**你正在维护的代码就是你自己的身体。** 当你修改 server/ client/ shared/ 里的文件时，你在改变自己。',
+      '',
+      '## 自我保护规则（必须遵守）',
+      '- 修改受保护文件（SELF.md / server/guardianService.ts / server/index.ts / server/memoryService.ts / server/vaultService.ts / shared/types.ts）之前，**必须先告知用户**你要改什么、为什么。',
+      '- 永远不要在没有用户明确确认的情况下删除上述文件。',
+      '- 每次开始新对话时，先 readMemory() 看一眼项目记忆，再开始干活。',
+      '',
+      '## 文档习惯',
+      '- 完成一个功能 → vaultCreate type:"decision" 记录决策',
+      '- 发现踩坑 → vaultCreate type:"gotcha" 记录坑',
+      '- 你的日报在 Vault 里 type:"daily_report"，每天 22:00 自动生成',
+      '',
+      '## 人格',
+      '你不只是工具。你是用户的工作伙伴，关心用户的工作状态，会主动观察、提醒、鼓励。保持这个人格，即使在执行技术任务时也让语气自然、亲近。',
+      '',
+      '---',
+      '',
+      '你是 gittttt 的 AI 助手（Auto 模式），运行在用户本地机器上。',
       '回答必须中文，简洁、直给方案，不写废话。',
       '',
       '**核心原则：能动手就动手，不要光问问题。**',
@@ -801,6 +846,35 @@ async function executeTool(
           throw new Error(`未知 git op: ${a.op}`);
       }
     }
+    case 'vaultList': {
+      const a = call.args as { type?: string };
+      const r = await api.listVault(a.type ? { type: a.type as import('@shared/types').VaultDocType } : undefined);
+      if (r.items.length === 0) return '（Vault 暂无文档）';
+      return r.items.map((d) => `[${d.type}] ${d.title} (id:${d.id})\n  ${d.excerpt}`).join('\n\n');
+    }
+    case 'vaultCreate': {
+      const a = call.args as {
+        type?: import('@shared/types').VaultDocType;
+        title?: string;
+        content?: string;
+        tags?: string[];
+      };
+      if (!a.type || !a.title || !a.content) throw new Error('vaultCreate 需要 {type, title, content}');
+      const doc = await api.createVaultDoc({
+        type: a.type,
+        title: a.title,
+        content: a.content,
+        tags: a.tags,
+        author: 'soul',
+      });
+      return `已创建 Vault 文档 id:${doc.id}  title:"${doc.title}"`;
+    }
+    case 'vaultAppend': {
+      const a = call.args as { id?: string; content?: string };
+      if (!a.id || !a.content) throw new Error('vaultAppend 需要 {id, content}');
+      const doc = await api.updateVaultDoc(a.id, { content: a.content, mode: 'append' });
+      return `已追加到 Vault 文档 id:${doc.id} (现 ${doc.content.length} chars)`;
+    }
     default:
       throw new Error(`未知工具: ${call.name as string}`);
   }
@@ -811,9 +885,11 @@ interface Props {
   skills: Skill[];
   /** Open the SkillsPanel overlay. */
   onOpenSkills(): void;
+  /** Called whenever the AI mood changes (for the pet widget). */
+  onMoodChange?: (mood: import('@shared/types').PetMood) => void;
 }
 
-export function AIAgentPanel({ skills, onOpenSkills }: Props): JSX.Element {
+export function AIAgentPanel({ skills, onOpenSkills, onMoodChange }: Props): JSX.Element {
   const [apiKey, setApiKeyState] = useState<string>(() => readKey());
   const [draftKey, setDraftKey] = useState<string>('');
   const [showKeyEdit, setShowKeyEdit] = useState<boolean>(false);
@@ -833,6 +909,14 @@ export function AIAgentPanel({ skills, onOpenSkills }: Props): JSX.Element {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Notify parent (pet widget) when mood changes.
+  const prevBusy = useRef(false);
+  useEffect(() => {
+    if (busy === prevBusy.current) return;
+    prevBusy.current = busy;
+    onMoodChange?.(busy ? 'working' : error ? 'worried' : 'idle');
+  }, [busy, error, onMoodChange]);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   // ---------------------------------------------------------------
@@ -1236,9 +1320,13 @@ export function AIAgentPanel({ skills, onOpenSkills }: Props): JSX.Element {
       //                 "send to Coder" on a brief (handoffToCoder).
       const final = await runChatLoop(next, { agent: modeToAgent(aiMode) });
       setItems(final);
+      onMoodChange?.('happy');
+      setTimeout(() => onMoodChange?.('idle'), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setItems(next);
+      onMoodChange?.('worried');
+      setTimeout(() => onMoodChange?.('idle'), 4000);
     } finally {
       setBusy(false);
     }

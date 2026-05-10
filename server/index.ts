@@ -24,6 +24,10 @@ import * as browserSvc from './browserService.js';
 import { BrowserError } from './browserService.js';
 import * as memorySvc from './memoryService.js';
 import { MemoryError } from './memoryService.js';
+import * as guardian from './guardianService.js';
+import * as vaultSvc from './vaultService.js';
+import { VaultError } from './vaultService.js';
+import { getDailyReportService } from './dailyReportService.js';
 import type {
   AIChatRequest,
   BrowserRequest,
@@ -574,13 +578,20 @@ app.post(
   '/api/project/file',
   ah(async (req, res) => {
     const root = resolveProjectRoot(req);
-    const { path, content } = (req.body ?? {}) as { path?: string; content?: string };
+    const { path, content, unlockToken } = (req.body ?? {}) as {
+      path?: string; content?: string; unlockToken?: string;
+    };
     if (!path || typeof path !== 'string') {
       res.status(400).json({ error: 'body.path is required' });
       return;
     }
     if (typeof content !== 'string') {
       res.status(400).json({ error: 'body.content must be a string' });
+      return;
+    }
+    const guard = guardian.checkFilePath(root, resolve(root, path), unlockToken);
+    if (!guard.allowed) {
+      res.status(403).json({ error: guard.reason });
       return;
     }
     const result = await writeProjectFile(root, path, content);
@@ -593,10 +604,15 @@ app.delete(
   ah(async (req, res) => {
     const root = resolveProjectRoot(req);
     // Some HTTP libs strip DELETE bodies, so accept ?path= as well.
-    const fromBody = (req.body ?? {}) as { path?: string };
+    const fromBody = (req.body ?? {}) as { path?: string; unlockToken?: string };
     const path = fromBody.path ?? (typeof req.query.path === 'string' ? req.query.path : '');
     if (!path) {
       res.status(400).json({ error: 'path is required' });
+      return;
+    }
+    const guard = guardian.checkFilePath(root, resolve(root, path), fromBody.unlockToken);
+    if (!guard.allowed) {
+      res.status(403).json({ error: guard.reason });
       return;
     }
     const result = await deleteProjectFile(root, path);
@@ -623,7 +639,13 @@ app.post(
   '/api/terminal/run',
   ah(async (req, res) => {
     const root = resolveProjectRoot(req);
-    res.json(await runCommand(root, (req.body ?? {}) as TerminalRunRequest));
+    const body = (req.body ?? {}) as TerminalRunRequest & { unlockToken?: string };
+    const guard = guardian.checkCommand(body.command ?? '', body.unlockToken);
+    if (!guard.allowed) {
+      res.status(403).json({ error: guard.reason });
+      return;
+    }
+    res.json(await runCommand(root, body));
   }),
 );
 
@@ -772,6 +794,90 @@ app.delete('/api/memory/:key', ah(async (req, res) => {
 }));
 
 // -----------------------------------------------------------------------------
+// Guardian — self-protection unlock API.
+// POST /api/guardian/unlock  → generate a 60-second unlock token
+// POST /api/guardian/revoke  → revoke early
+// GET  /api/guardian/status  → { locked, expiresIn? }
+// -----------------------------------------------------------------------------
+app.post('/api/guardian/unlock', ah(async (_req, res) => {
+  const token = guardian.generateUnlockToken();
+  res.json({ token, ttlMs: 60_000 });
+}));
+
+app.post('/api/guardian/revoke', ah(async (_req, res) => {
+  guardian.revokeUnlock();
+  res.json({ ok: true });
+}));
+
+app.get('/api/guardian/status', ah(async (_req, res) => {
+  res.json(guardian.unlockStatus());
+}));
+
+// -----------------------------------------------------------------------------
+// Vault — structured project documentation.
+//
+//   GET    /api/vault             → list all docs (with optional ?projectRef= filter)
+//   POST   /api/vault             → create a new doc
+//   GET    /api/vault/:id         → fetch single doc
+//   PUT    /api/vault/:id         → update doc (AI can append; cannot delete)
+//   DELETE /api/vault/:id         → permanently delete (user-only, requires unlock token)
+// -----------------------------------------------------------------------------
+app.get('/api/vault', ah(async (req, res) => {
+  const projectRef = typeof req.query.projectRef === 'string' ? req.query.projectRef : undefined;
+  const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  res.json({ items: vaultSvc.listDocs({ projectRef, type }) });
+}));
+
+app.post('/api/vault', ah(async (req, res) => {
+  const body = (req.body ?? {}) as Parameters<typeof vaultSvc.createDoc>[0];
+  res.status(201).json(vaultSvc.createDoc(body));
+}));
+
+app.get('/api/vault/:id', ah(async (req, res) => {
+  const doc = vaultSvc.getDoc(req.params.id);
+  if (!doc) { res.status(404).json({ error: 'doc not found' }); return; }
+  res.json(doc);
+}));
+
+app.put('/api/vault/:id', ah(async (req, res) => {
+  const body = (req.body ?? {}) as { content?: string; title?: string; mode?: 'replace' | 'append' };
+  const doc = vaultSvc.updateDoc(req.params.id, body);
+  if (!doc) { res.status(404).json({ error: 'doc not found' }); return; }
+  res.json(doc);
+}));
+
+app.delete('/api/vault/:id', ah(async (req, res) => {
+  // Vault delete is user-only — require unlock token.
+  const body = (req.body ?? {}) as { unlockToken?: string };
+  const token = body.unlockToken ?? (typeof req.query.unlockToken === 'string' ? req.query.unlockToken : undefined);
+  if (!token || !guardian.isUnlocked(token)) {
+    res.status(403).json({ error: '删除 Vault 文档需要先解锁（POST /api/guardian/unlock）' });
+    return;
+  }
+  const removed = vaultSvc.deleteDoc(req.params.id);
+  res.json({ ok: true, removed });
+}));
+
+// -----------------------------------------------------------------------------
+// Daily report — on-demand trigger + scheduler status.
+//   POST /api/daily-report/generate  → generate now (returns the new doc)
+//   GET  /api/daily-report/latest    → latest report for active repo
+// -----------------------------------------------------------------------------
+app.post('/api/daily-report/generate', ah(async (_req, res) => {
+  const root = activeRepoPath ?? process.cwd();
+  const report = getDailyReportService();
+  const doc = await report.generate(root);
+  res.json(doc);
+}));
+
+app.get('/api/daily-report/latest', ah(async (_req, res) => {
+  const root = activeRepoPath ?? process.cwd();
+  const report = getDailyReportService();
+  const doc = report.getLatest(root);
+  res.json(doc ?? null);
+}));
+
+// -----------------------------------------------------------------------------
 // In-app folder browser (drives the "open any folder" UI without a path
 // input). Returns subdirectories of `path` (defaulting to $HOME), each
 // flagged with whether it's a git repo.
@@ -846,6 +952,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void =>
     || err instanceof HttpRequestError
     || err instanceof BrowserError
     || err instanceof MemoryError
+    || err instanceof VaultError
   ) {
     status = err.status;
   } else {
@@ -861,6 +968,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void =>
 app.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
   console.log(`[gittttt] server listening on http://${HOST}:${PORT}`);
+
+  // Start the daily report scheduler.
+  getDailyReportService().scheduleDaily(() => activeRepoPath);
+
   if (existsSync(DEFAULT_REPO)) {
     try {
       attachRepo(DEFAULT_REPO);
